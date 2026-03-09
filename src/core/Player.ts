@@ -27,6 +27,9 @@ export class Player {
   private actions: Map<string, THREE.AnimationAction> = new Map()
   private currentState: PlayerState = 'idle'
   
+  // 🔥 🔥 НОВОЕ: Флаг начала движения
+  private isMoving = false  // ← Двигается ли персонаж вперёд
+  
   // 🔥 Колбэки и таймеры
   private fallTimer: number | null = null
   private onFallComplete?: () => void
@@ -45,10 +48,9 @@ export class Player {
       console.log(`📊 Зарегистрировано скинов: ${this.characterMeshes.size}`)
       console.log(`🎬 Зарегистрировано анимаций: ${this.actions.size}`)
       
-      // 🔥 Применяем начальный скин
       this.setSkin(this.currentSkin)
       
-      // 🔥 ЗАПУСКАЕМ IDLE АНИМАЦИЮ
+      // 🔥 Запускаем idle анимацию (персонаж стоит на месте)
       setTimeout(() => {
         console.log('▶️ Запуск idle анимации')
         this.playAnimation('idle')
@@ -59,7 +61,6 @@ export class Player {
   private loadAssets(onComplete: () => void): void {
     this.loadAtlas(() => {
       this.loadCharacterModel(() => {
-        // После загрузки модели, загружаем анимации
         this.loadMixamoAnimations(() => {
           onComplete()
         })
@@ -95,9 +96,6 @@ export class Player {
     )
   }
   
-  /**
-   * 🔥 Загружает базовую модель персонажа
-   */
   private loadCharacterModel(onReady: () => void): void {
     const loader = new FBXLoader()
     loader.crossOrigin = 'anonymous'
@@ -108,10 +106,8 @@ export class Player {
         console.log('✅ Базовая модель загружена')
         console.log(`📦 Дочерних объектов: ${object.children.length}`)
         
-        // 🔥 Сохраняем модель
         this.model = object
         
-        // 🔥 1. Сначала сохраняем все meshы для управления скинами
         object.traverse((child) => {
           if (child instanceof THREE.Mesh && child.name) {
             this.characterMeshes.set(child.name, child)
@@ -119,30 +115,23 @@ export class Player {
           }
         })
         
-        // 🔥 2. Применяем текстуру
         if (this.atlasTexture) {
           this.applyTextureToModel(object)
         }
         
-        // 🔥 3. Добавляем в сцену
         this.mesh.add(object)
         this.mesh.position.set(0, 0.75, 0)
         
-        // 🔥 4. Масштабируем - УВЕЛИЧЕННЫЙ РАЗМЕР!
         const box = new THREE.Box3().setFromObject(object)
         const size = new THREE.Vector3()
         box.getSize(size)
         if (size.y > 0.1) {
-          // 🔥 УВЕЛИЧИВАЕМ РАЗМЕР: было 2.0, стало 2.5
           const scale = 2.5 / size.y
           this.mesh.scale.setScalar(scale)
           console.log(`⚖️ Масштаб: ${scale.toFixed(2)} (увеличен)`)
-          console.log(`📏 Новый размер: ${(size.y * scale).toFixed(2)} единиц`)
         }
         
-        // 🔥 5. Создаём микшер для модели
         this.mixer = new THREE.AnimationMixer(object)
-        
         onReady()
       },
       undefined,
@@ -154,9 +143,6 @@ export class Player {
     )
   }
   
-  /**
-   * 🔥 Применяет текстуру ко всем мешам
-   */
   private applyTextureToModel(object: THREE.Object3D): void {
     let texturedMeshes = 0
     
@@ -194,9 +180,6 @@ export class Player {
     console.log(`🎨 Текстура применена к ${texturedMeshes} мешам`)
   }
   
-  /**
-   * 🔥 Загружает анимации из Mixamo
-   */
   private loadMixamoAnimations(onReady: () => void): void {
     if (!this.mixer) {
       console.error('❌ Микшер не инициализирован!')
@@ -208,7 +191,8 @@ export class Player {
     loader.crossOrigin = 'anonymous'
     
     const animationsToLoad = [
-      { path: '/models/Running.fbx', name: 'run' }
+      { path: '/models/Running.fbx', name: 'run' },
+      { path: '/models/Game_over.fbx', name: 'fall' }
     ]
     
     let loaded = 0
@@ -218,7 +202,6 @@ export class Player {
       if (++loaded >= total) {
         console.log(`🎬 Загружено анимаций: ${this.actions.size}/${total}`)
         
-        // 🔥 Создаем IDLE анимацию, если её нет
         if (!this.actions.has('idle')) {
           this.createIdleAnimation()
         }
@@ -233,33 +216,30 @@ export class Player {
         (object: THREE.Object3D) => {
           console.log(`✅ Загружен файл: ${path}`)
           
-          // 🔥 ВАЖНО: Проверяем анимации
           if (object.animations && object.animations.length > 0) {
-            // Ищем анимацию с правильной длительностью
-            let runClip = object.animations.find(clip => clip.duration > 0.5)
-            
-            if (!runClip && object.animations.length > 0) {
-              runClip = object.animations[0]
+            let clip = object.animations.find(clip => clip.duration > 0.5)
+            if (!clip && object.animations.length > 0) {
+              clip = object.animations[0]
             }
             
-            if (runClip) {
-              console.log(`  🎬 Анимация: "${runClip.name}" (${runClip.duration.toFixed(2)}s)`)
+            if (clip) {
+              console.log(`  🎬 Анимация: "${clip.name}" (${clip.duration.toFixed(2)}s)`)
               
-              // 🔥 ВАЖНО: Клонируем клип
-              const clonedClip = runClip.clone()
+              const clonedClip = clip.clone()
               clonedClip.name = name
               
-              // 🔥 ВАЖНО: Создаем действие через МИКШЕР
               const action = this.mixer!.clipAction(clonedClip)
-              action.loop = THREE.LoopRepeat
+              action.loop = name === 'fall' ? THREE.LoopOnce : THREE.LoopRepeat
               
-              // Сохраняем
+              if (name === 'fall') {
+                action.clampWhenFinished = true
+              }
+              
               this.actions.set(name, action)
               console.log(`  ✅ Анимация "${name}" зарегистрирована`)
             }
           }
           
-          // Освобождаем память
           object.traverse((child) => {
             if (child instanceof THREE.Mesh) {
               child.geometry?.dispose()
@@ -282,15 +262,11 @@ export class Player {
     })
   }
   
-  /**
-   * 🔥 СОЗДАЕТ IDLE АНИМАЦИЮ
-   */
   private createIdleAnimation(): void {
     if (!this.mixer) return
     
     console.log('🔄 Создаю idle анимацию...')
     
-    // Создаем простую idle анимацию
     const times = [0, 1, 2]
     const posY = [0, 0.03, 0]
     const rotY = [0, 0.05, 0]
@@ -306,8 +282,6 @@ export class Player {
     console.log('✅ Idle анимация создана')
   }
   
-  // 🔥 ПУБЛИЧНЫЕ МЕТОДЫ
-  
   private playAnimation(name: string, fadeIn: number = 0.2): void {
     const newAction = this.actions.get(name)
     if (!newAction) {
@@ -317,14 +291,12 @@ export class Player {
     
     console.log(`▶️ Воспроизведение анимации "${name}"`)
     
-    // Останавливаем все текущие анимации
-    this.actions.forEach((action, key) => {
+    this.actions.forEach((action) => {
       if (action.isRunning()) {
         action.fadeOut(fadeIn)
       }
     })
     
-    // Запуск новой
     newAction.reset()
     newAction.fadeIn(fadeIn)
     newAction.play()
@@ -332,11 +304,33 @@ export class Player {
     this.currentState = name as PlayerState
   }
   
+  /**
+   * 🔥 🔥 ИСПРАВЛЕНО: Только анимация, без движения!
+   */
   startRunning(): void {
     if (this.currentState !== 'running') {
-      console.log('🏃 Запуск бега')
+      console.log('🏃 Запуск анимации бега')
       this.playAnimation('run')
+      // 🔥 НЕ включаем isMoving здесь!
     }
+  }
+  
+  /**
+   * 🔥 🔥 НОВОЕ: Начать движение вперёд (только при нажатии клавиш)
+   */
+  startMoving(): void {
+    if (!this.isMoving) {
+      console.log('▶️ Начало движения вперёд')
+      this.isMoving = true
+      this.startRunning()  // Запускаем анимацию если ещё не запущена
+    }
+  }
+  
+  /**
+   * 🔥 Проверка: двигается ли персонаж
+   */
+  isMovingForward(): boolean {
+    return this.isMoving
   }
   
   stopRunning(): void {
@@ -349,16 +343,30 @@ export class Player {
   playFall(onComplete?: () => void): void {
     this.onFallComplete = onComplete
     this.currentState = 'falling'
+    this.isMoving = false  // 🔥 Останавливаем движение
+    
+    this.targetX = this.currentLane * this.LANE_WIDTH
     
     const fallAction = this.actions.get('fall')
     if (fallAction) {
+      fallAction.time = 0
+      fallAction.reset()
       this.playAnimation('fall', 0.1)
-      const duration = (fallAction as any).duration || 1.5
+      
+      let fallDuration = 1.5
+      if (fallAction.getClip()) {
+        fallDuration = fallAction.getClip().duration
+      }
+      
+      console.log(`⏱️ Длительность анимации падения: ${fallDuration.toFixed(2)}s`)
+      
       this.fallTimer = window.setTimeout(() => {
         this.fallTimer = null
+        console.log('🏁 Анимация падения завершена')
         if (this.onFallComplete) this.onFallComplete()
-      }, duration * 1000 + 100)
+      }, fallDuration * 1000)
     } else {
+      console.warn('⚠️ Анимация падения не найдена, использую заглушку')
       setTimeout(() => {
         if (this.onFallComplete) this.onFallComplete()
       }, 800)
@@ -368,6 +376,7 @@ export class Player {
   playDance(onComplete?: () => void): void {
     this.onDanceComplete = onComplete
     this.currentState = 'dancing'
+    this.isMoving = false  // 🔥 Останавливаем движение
     
     const danceAction = this.actions.get('dance')
     if (danceAction) {
@@ -392,8 +401,6 @@ export class Player {
     })
   }
   
-  // 🔥 ДВИЖЕНИЕ
-  
   moveLeft(): void {
     if (this.currentLane > -1) {
       this.currentLane--
@@ -408,19 +415,26 @@ export class Player {
     }
   }
   
+  /**
+   * 🔥 🔥 ИСПРАВЛЕНО: Движение только если isMoving = true
+   */
   update(delta: number): void {
     if (this.mixer) {
       this.mixer.update(delta)
     }
     
-    this.mesh.position.z += this.FORWARD_SPEED * 60 * delta
+    // 🔥 Двигаемся вперёд ТОЛЬКО если isMoving = true
+    if (this.isMoving && this.currentState !== 'falling') {
+      this.mesh.position.z += this.FORWARD_SPEED * 60 * delta
+    }
+    
     const targetX = this.currentLane * this.LANE_WIDTH
     this.mesh.position.x = THREE.MathUtils.lerp(this.mesh.position.x, targetX, this.MOVE_LERP)
   }
   
-  // 🔥 ГЕТТЕРЫ
-  
-  getPosition(): THREE.Vector3 { return this.mesh.position.clone() }
+  getPosition(): THREE.Vector3 { 
+    return this.mesh.position.clone() 
+  }
   
   getBounds(): THREE.Box3 {
     const box = new THREE.Box3().setFromObject(this.mesh)
@@ -428,11 +442,13 @@ export class Player {
     return box
   }
   
-  getMesh(): THREE.Group { return this.mesh }
+  getMesh(): THREE.Group { 
+    return this.mesh 
+  }
   
-  getState(): PlayerState { return this.currentState }
-  
-  // 🔥 СКИНЫ
+  getState(): PlayerState { 
+    return this.currentState 
+  }
   
   setSkin(skin: CharacterSkin): void {
     console.log(`🎨 setSkin("${skin}")`)
@@ -452,11 +468,10 @@ export class Player {
   }
   
   private createPlaceholderCube(): void {
-    // 🔥 УВЕЛИЧЕННЫЙ КУБ-ЗАГЛУШКА
-    const geo = new THREE.BoxGeometry(1.0, 2.0, 1.0) // Было 0.8, 1.5, 0.8
+    const geo = new THREE.BoxGeometry(1.0, 2.0, 1.0)
     const mat = new THREE.MeshStandardMaterial({ color: 0x4ecca3 })
     const mesh = new THREE.Mesh(geo, mat)
-    mesh.position.set(0, 1.0, 0) // Было 0.75
+    mesh.position.set(0, 1.0, 0)
     mesh.castShadow = true
     this.mesh.add(mesh)
   }
