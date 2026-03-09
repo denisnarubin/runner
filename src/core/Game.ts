@@ -9,12 +9,14 @@ export class Game {
   private renderer: THREE.WebGLRenderer
   private world: World | null = null
   private player: Player | null = null
-  
   private characterLight: THREE.PointLight | null = null
   private clock = new THREE.Clock()
   private score = 0
   private isGameOver = false
   private isTutorialVisible = true
+  
+  // Массив активных эффектов (взрывов)
+  private activeEffects: Array<{ update(delta: number): boolean }> = []
   
   // Настройки камеры
   private readonly CAM_OFFSET_X = 0
@@ -76,7 +78,451 @@ export class Game {
     this.showTutorial()
     this.setupControls()
     
-    console.log('🎮 Игра запущена!')
+    console.log('🎮 Игра запущена! Персонаж ждёт нажатия клавиш...')
+  }
+  
+  private createExplosion(position: THREE.Vector3): void {
+    this.createFlashLight(position)
+    this.createExplosionCore(position)
+    this.createSparksAndDebris(position)
+    this.createFireball(position)
+    this.createSmoke(position)
+    
+    setTimeout(() => {
+      this.createShockwave(position)
+    }, 300)
+  }
+  
+  private createFlashLight(position: THREE.Vector3): void {
+    const light = new THREE.PointLight(0xff6600, 5, 15)
+    light.position.copy(position)
+    this.scene.add(light)
+    
+    let life = 0
+    const maxLife = 0.3
+    
+    const effect = {
+      update: (delta: number): boolean => {
+        life += delta
+        const progress = life / maxLife
+        light.intensity = 5 * (1 - progress)
+        
+        if (life >= maxLife) {
+          this.scene.remove(light)
+          light.dispose()
+          return true
+        }
+        return false
+      }
+    }
+    
+    this.activeEffects.push(effect)
+  }
+  
+  private createExplosionCore(position: THREE.Vector3): void {
+    const particleCount = 60
+    const geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(particleCount * 3)
+    const colors = new Float32Array(particleCount * 3)
+    
+    for (let i = 0; i < particleCount; i++) {
+      positions[i*3] = position.x
+      positions[i*3+1] = position.y
+      positions[i*3+2] = position.z
+      
+      const r = 1.0
+      const g = 0.6 + Math.random() * 0.4
+      const b = 0.1 + Math.random() * 0.2
+      
+      colors[i*3] = r
+      colors[i*3+1] = g
+      colors[i*3+2] = b
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    
+    const material = new THREE.PointsMaterial({
+      size: 0.4,
+      vertexColors: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+      opacity: 1.0,
+      sizeAttenuation: true
+    })
+    
+    const particles = new THREE.Points(geometry, material)
+    this.scene.add(particles)
+    
+    const velocities: THREE.Vector3[] = []
+    for (let i = 0; i < particleCount; i++) {
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      const speed = 8 + Math.random() * 8
+      
+      velocities.push(new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta) * speed,
+        Math.sin(phi) * Math.sin(theta) * speed,
+        Math.cos(phi) * speed
+      ))
+    }
+    
+    let life = 0
+    const maxLife = 0.8
+    
+    const effect = {
+      update: (delta: number): boolean => {
+        life += delta
+        const progress = life / maxLife
+        
+        const posAttr = geometry.attributes.position
+        const posArray = posAttr.array as Float32Array
+        
+        for (let i = 0; i < particleCount; i++) {
+          posArray[i*3] = position.x + velocities[i].x * progress * 2
+          posArray[i*3+1] = position.y + velocities[i].y * progress * 2
+          posArray[i*3+2] = position.z + velocities[i].z * progress * 2
+        }
+        
+        posAttr.needsUpdate = true
+        material.opacity = 1 - progress * 1.5
+        material.size = 0.4 * (1 - progress * 0.5)
+        
+        if (life >= maxLife) {
+          this.scene.remove(particles)
+          geometry.dispose()
+          material.dispose()
+          return true
+        }
+        return false
+      }
+    }
+    
+    this.activeEffects.push(effect)
+  }
+  
+  private createFireball(position: THREE.Vector3): void {
+    const particleCount = 30
+    const geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(particleCount * 3)
+    
+    for (let i = 0; i < particleCount; i++) {
+      positions[i*3] = position.x
+      positions[i*3+1] = position.y
+      positions[i*3+2] = position.z
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    
+    const canvas = document.createElement('canvas')
+    canvas.width = 32
+    canvas.height = 32
+    const ctx = canvas.getContext('2d')!
+    
+    const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16)
+    gradient.addColorStop(0, 'rgba(255,255,255,1)')
+    gradient.addColorStop(0.4, 'rgba(255,200,100,1)')
+    gradient.addColorStop(0.7, 'rgba(255,100,0,0.8)')
+    gradient.addColorStop(1, 'rgba(255,0,0,0)')
+    
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, 32, 32)
+    
+    const texture = new THREE.CanvasTexture(canvas)
+    
+    const material = new THREE.PointsMaterial({
+      size: 1.5,
+      map: texture,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+      opacity: 0.9,
+      sizeAttenuation: true,
+      color: 0xffaa33
+    })
+    
+    const particles = new THREE.Points(geometry, material)
+    this.scene.add(particles)
+    
+    const velocities: THREE.Vector3[] = []
+    for (let i = 0; i < particleCount; i++) {
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      const speed = 2 + Math.random() * 3
+      
+      velocities.push(new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta) * speed,
+        Math.sin(phi) * Math.sin(theta) * speed * 0.5,
+        Math.cos(phi) * speed
+      ))
+    }
+    
+    let life = 0
+    const maxLife = 1.5
+    
+    const effect = {
+      update: (delta: number): boolean => {
+        life += delta
+        const progress = life / maxLife
+        
+        const posAttr = geometry.attributes.position
+        const posArray = posAttr.array as Float32Array
+        
+        for (let i = 0; i < particleCount; i++) {
+          posArray[i*3] = position.x + velocities[i].x * life * 1.5
+          posArray[i*3+1] = position.y + 0.5 + velocities[i].y * life * 1.2
+          posArray[i*3+2] = position.z + velocities[i].z * life * 1.5
+        }
+        
+        posAttr.needsUpdate = true
+        material.opacity = 0.9 * (1 - progress * 0.8)
+        material.size = 1.5 * (1 + progress)
+        
+        if (life >= maxLife) {
+          this.scene.remove(particles)
+          geometry.dispose()
+          material.dispose()
+          texture.dispose()
+          return true
+        }
+        return false
+      }
+    }
+    
+    this.activeEffects.push(effect)
+  }
+  
+  private createSmoke(position: THREE.Vector3): void {
+    const particleCount = 25
+    const geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(particleCount * 3)
+    
+    for (let i = 0; i < particleCount; i++) {
+      positions[i*3] = position.x
+      positions[i*3+1] = position.y
+      positions[i*3+2] = position.z
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    
+    const canvas = document.createElement('canvas')
+    canvas.width = 32
+    canvas.height = 32
+    const ctx = canvas.getContext('2d')!
+    
+    const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16)
+    gradient.addColorStop(0, 'rgba(100,100,100,0.8)')
+    gradient.addColorStop(0.5, 'rgba(80,80,80,0.5)')
+    gradient.addColorStop(1, 'rgba(50,50,50,0)')
+    
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, 32, 32)
+    
+    const texture = new THREE.CanvasTexture(canvas)
+    
+    const material = new THREE.PointsMaterial({
+      size: 2.0,
+      map: texture,
+      blending: THREE.NormalBlending,
+      depthWrite: false,
+      transparent: true,
+      opacity: 0.6,
+      sizeAttenuation: true,
+      color: 0x888888
+    })
+    
+    const particles = new THREE.Points(geometry, material)
+    this.scene.add(particles)
+    
+    const velocities: THREE.Vector3[] = []
+    for (let i = 0; i < particleCount; i++) {
+      const theta = Math.random() * Math.PI * 2
+      const speed = 1 + Math.random() * 2
+      
+      velocities.push(new THREE.Vector3(
+        Math.cos(theta) * speed,
+        Math.random() * 2,
+        Math.sin(theta) * speed
+      ))
+    }
+    
+    let life = 0
+    const maxLife = 2.2
+    
+    const effect = {
+      update: (delta: number): boolean => {
+        life += delta
+        const progress = life / maxLife
+        
+        const posAttr = geometry.attributes.position
+        const posArray = posAttr.array as Float32Array
+        
+        for (let i = 0; i < particleCount; i++) {
+          posArray[i*3] = position.x + velocities[i].x * life * 1.5
+          posArray[i*3+1] = position.y + 1.0 + velocities[i].y * life * 2
+          posArray[i*3+2] = position.z + velocities[i].z * life * 1.5
+        }
+        
+        posAttr.needsUpdate = true
+        material.opacity = 0.6 * (1 - progress * 0.7)
+        material.size = 2.0 * (1 + progress)
+        
+        if (life >= maxLife) {
+          this.scene.remove(particles)
+          geometry.dispose()
+          material.dispose()
+          texture.dispose()
+          return true
+        }
+        return false
+      }
+    }
+    
+    this.activeEffects.push(effect)
+  }
+  
+  private createSparksAndDebris(position: THREE.Vector3): void {
+    const particleCount = 50
+    const geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(particleCount * 3)
+    const colors = new Float32Array(particleCount * 3)
+    
+    for (let i = 0; i < particleCount; i++) {
+      positions[i*3] = position.x
+      positions[i*3+1] = position.y
+      positions[i*3+2] = position.z
+      
+      const r = 0.9 + Math.random() * 0.3
+      const g = 0.7 + Math.random() * 0.3
+      const b = 0.3 + Math.random() * 0.3
+      
+      colors[i*3] = r
+      colors[i*3+1] = g
+      colors[i*3+2] = b
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    
+    const material = new THREE.PointsMaterial({
+      size: 0.2,
+      vertexColors: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+      opacity: 1.0,
+      sizeAttenuation: true
+    })
+    
+    const particles = new THREE.Points(geometry, material)
+    this.scene.add(particles)
+    
+    const velocities: THREE.Vector3[] = []
+    for (let i = 0; i < particleCount; i++) {
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      const speed = 5 + Math.random() * 10
+      
+      velocities.push(new THREE.Vector3(
+        Math.sin(phi) * Math.cos(theta) * speed,
+        Math.sin(phi) * Math.sin(theta) * speed,
+        Math.cos(phi) * speed
+      ))
+    }
+    
+    let life = 0
+    const maxLife = 1.0
+    
+    const effect = {
+      update: (delta: number): boolean => {
+        life += delta
+        const progress = life / maxLife
+        
+        const posAttr = geometry.attributes.position
+        const posArray = posAttr.array as Float32Array
+        
+        for (let i = 0; i < particleCount; i++) {
+          posArray[i*3] = position.x + velocities[i].x * life * 2
+          posArray[i*3+1] = position.y + velocities[i].y * life * 2
+          posArray[i*3+2] = position.z + velocities[i].z * life * 2
+        }
+        
+        posAttr.needsUpdate = true
+        material.opacity = 1 - progress * 1.5
+        material.size = 0.2 * (1 - progress * 0.8)
+        
+        if (life >= maxLife) {
+          this.scene.remove(particles)
+          geometry.dispose()
+          material.dispose()
+          return true
+        }
+        return false
+      }
+    }
+    
+    this.activeEffects.push(effect)
+  }
+  
+  private createShockwave(position: THREE.Vector3): void {
+    const segments = 32
+    const geometry = new THREE.RingGeometry(0.1, 0.5, segments)
+    
+    const canvas = document.createElement('canvas')
+    canvas.width = 64
+    canvas.height = 64
+    const ctx = canvas.getContext('2d')!
+    
+    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
+    gradient.addColorStop(0, 'rgba(255,255,255,0)')
+    gradient.addColorStop(0.3, 'rgba(255,200,100,0.8)')
+    gradient.addColorStop(0.6, 'rgba(255,100,50,0.4)')
+    gradient.addColorStop(1, 'rgba(255,0,0,0)')
+    
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, 64, 64)
+    
+    const texture = new THREE.CanvasTexture(canvas)
+    
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    })
+    
+    const ring = new THREE.Mesh(geometry, material)
+    ring.position.copy(position)
+    ring.position.y += 0.5
+    ring.rotation.x = Math.PI / 2
+    this.scene.add(ring)
+    
+    let life = 0
+    const maxLife = 0.8
+    
+    const effect = {
+      update: (delta: number): boolean => {
+        life += delta
+        const progress = life / maxLife
+        const scale = 1 + progress * 5
+        
+        ring.scale.set(scale, scale, scale)
+        ring.material.opacity = 1 - progress
+        
+        if (life >= maxLife) {
+          this.scene.remove(ring)
+          geometry.dispose()
+          material.dispose()
+          texture.dispose()
+          return true
+        }
+        return false
+      }
+    }
+    
+    this.activeEffects.push(effect)
   }
   
   private showTutorial(): void {
@@ -95,8 +541,8 @@ export class Game {
       <h2 style="font-size: 28px; margin-bottom: 20px;">🎮 Как играть</h2>
       <p style="font-size: 18px; margin: 10px;">👆 Свайпни <b>влево/вправо</b> для движения</p>
       <p style="font-size: 18px; margin: 10px;">🪙 Собирай <b>монеты</b></p>
-      <p style="font-size: 18px; margin: 10px;">💣 Избегай <b>бомб</b></p>
-      <p style="font-size: 18px; margin: 10px; margin-top: 30px; opacity: 0.8;">Нажми в любом месте чтобы начать</p>
+      <p style="font-size: 18px; margin: 10px;">💣 Избегай <b>бомб</b> (эпичные взрывы и падение!)</p>
+      <p style="font-size: 18px; margin: 10px; margin-top: 30px; opacity: 0.8;">Нажми любую клавишу чтобы начать</p>
     `
     document.body.appendChild(overlay)
     
@@ -104,7 +550,9 @@ export class Game {
       if (this.isTutorialVisible) {
         this.isTutorialVisible = false
         overlay.remove()
+        // 🔥 ТОЛЬКО запускаем анимацию, НЕ начинаем движение!
         this.player?.startRunning()
+        console.log('🎮 Туториал закрыт, ждём нажатия клавиш для начала движения...')
       }
     }
     
@@ -119,6 +567,9 @@ export class Game {
     const onEnd = (x: number) => {
       const diff = x - startX
       if (Math.abs(diff) > 50) {
+        // 🔥 Сначала начинаем движение!
+        this.player?.startMoving()
+        
         if (diff > 0) this.player?.moveRight()
         else this.player?.moveLeft()
       }
@@ -129,9 +580,15 @@ export class Game {
     window.addEventListener('touchstart', (e) => onStart(e.touches[0].clientX), { passive: true })
     window.addEventListener('touchend', (e) => onEnd(e.changedTouches[0].clientX), { passive: true })
     
+    // 🔥 Клавиатура - начинаем движение при первом нажатии
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowLeft') this.player?.moveLeft()
-      if (e.key === 'ArrowRight') this.player?.moveRight()
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+        // 🔥 Сначала начинаем движение!
+        this.player?.startMoving()
+        
+        if (e.key === 'ArrowLeft') this.player?.moveLeft()
+        if (e.key === 'ArrowRight') this.player?.moveRight()
+      }
     })
   }
   
@@ -150,11 +607,9 @@ export class Game {
       this.checkCollisions()
       
       const pos = this.player.getPosition()
-      
       this.camera.position.x += (pos.x - this.camera.position.x) * this.CAM_SMOOTH
       this.camera.position.y += (this.CAM_OFFSET_Y - this.camera.position.y) * this.CAM_SMOOTH
       this.camera.position.z += (pos.z + this.CAM_OFFSET_Z - this.camera.position.z) * this.CAM_SMOOTH
-      
       this.camera.lookAt(pos.x, 1.5, pos.z + this.CAM_LOOKAHEAD)
       
       if (this.characterLight) {
@@ -163,12 +618,17 @@ export class Game {
       }
     }
     
+    // Обновляем эффекты
+    for (let i = this.activeEffects.length - 1; i >= 0; i--) {
+      const completed = this.activeEffects[i].update(delta)
+      if (completed) {
+        this.activeEffects.splice(i, 1)
+      }
+    }
+    
     this.renderer.render(this.scene, this.camera)
   }
   
-  /**
-   * 🔥 ПРОВЕРКА СТОЛКНОВЕНИЙ С ТОЧНЫМ РАДИУСОМ
-   */
   private checkCollisions(): void {
     if (!this.player || !this.world || this.isGameOver) return
     
@@ -180,7 +640,6 @@ export class Game {
       const type = (obj as any).type as string
       
       let shouldCollide = false
-      
       const objPos = new THREE.Vector3()
       obj.getWorldPosition(objPos)
       const distance = playerPos.distanceTo(objPos)
@@ -189,24 +648,22 @@ export class Game {
         case 'bomb':
           shouldCollide = distance < 0.5
           break
-        
         case 'coin':
           shouldCollide = distance < 0.8
           break
-        
         case 'gate':
           shouldCollide = true
           break
       }
       
       if (shouldCollide) {
-        this.handleCollision(obj)
+        this.handleCollision(obj, objPos)
         objects.splice(i, 1)
       }
     }
   }
   
-  private handleCollision(obj: THREE.Mesh): void {
+  private handleCollision(obj: THREE.Mesh, objPos: THREE.Vector3): void {
     const type = (obj as any).type as string
     
     switch (type) {
@@ -217,9 +674,13 @@ export class Game {
         break
         
       case 'bomb':
+        this.createExplosion(objPos)
+        
         this.player?.playFall(() => {
+          console.log('💀 Анимация падения завершена, показываем экран окончания')
           this.endGame(false)
         })
+        
         this.world?.removeObject(obj)
         this.playSound('bomb')
         break
