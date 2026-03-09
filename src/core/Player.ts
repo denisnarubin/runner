@@ -11,7 +11,7 @@ export type CharacterSkin =
   | 'Character_Hotdog' | 'Character_PunkGirl' | 'Character_Paramedic'
   | 'Character_GamerGirl' | 'ALL'
 
-export type PlayerState = 'idle' | 'running' | 'falling' | 'dancing' | 'finished'
+export type PlayerState = 'idle' | 'running' | 'falling' | 'dancing' | 'breakdance' | 'finished'
 
 export class Player {
   private mesh: THREE.Group
@@ -27,11 +27,12 @@ export class Player {
   private actions: Map<string, THREE.AnimationAction> = new Map()
   private currentState: PlayerState = 'idle'
   
-  // 🔥 🔥 НОВОЕ: Флаг начала движения
-  private isMoving = false  // ← Двигается ли персонаж вперёд
+  // 🔥 Флаг начала движения
+  private isMoving = false
   
   // 🔥 Колбэки и таймеры
   private fallTimer: number | null = null
+  private danceTimer: number | null = null
   private onFallComplete?: () => void
   private onDanceComplete?: () => void
   
@@ -50,7 +51,7 @@ export class Player {
       
       this.setSkin(this.currentSkin)
       
-      // 🔥 Запускаем idle анимацию (персонаж стоит на месте)
+      // 🔥 Запускаем idle анимацию
       setTimeout(() => {
         console.log('▶️ Запуск idle анимации')
         this.playAnimation('idle')
@@ -190,9 +191,11 @@ export class Player {
     const loader = new FBXLoader()
     loader.crossOrigin = 'anonymous'
     
+    // 🔥 Добавляем Breakdance.fbx
     const animationsToLoad = [
       { path: '/models/Running.fbx', name: 'run' },
-      { path: '/models/Game_over.fbx', name: 'fall' }
+      { path: '/models/Game_over.fbx', name: 'fall' },
+      { path: '/models/Breakdance.fbx', name: 'breakdance' }
     ]
     
     let loaded = 0
@@ -229,10 +232,15 @@ export class Player {
               clonedClip.name = name
               
               const action = this.mixer!.clipAction(clonedClip)
-              action.loop = name === 'fall' ? THREE.LoopOnce : THREE.LoopRepeat
-              
+              // 🔥 Настройка Loop для разных анимаций
               if (name === 'fall') {
+                action.loop = THREE.LoopOnce
                 action.clampWhenFinished = true
+              } else if (name === 'breakdance') {
+                action.loop = THREE.LoopOnce // Проигрываем один раз
+                action.clampWhenFinished = true
+              } else {
+                action.loop = THREE.LoopRepeat
               }
               
               this.actions.set(name, action)
@@ -304,31 +312,26 @@ export class Player {
     this.currentState = name as PlayerState
   }
   
-  /**
-   * 🔥 🔥 ИСПРАВЛЕНО: Только анимация, без движения!
-   */
   startRunning(): void {
     if (this.currentState !== 'running') {
       console.log('🏃 Запуск анимации бега')
       this.playAnimation('run')
-      // 🔥 НЕ включаем isMoving здесь!
     }
   }
   
-  /**
-   * 🔥 🔥 НОВОЕ: Начать движение вперёд (только при нажатии клавиш)
-   */
   startMoving(): void {
     if (!this.isMoving) {
       console.log('▶️ Начало движения вперёд')
       this.isMoving = true
-      this.startRunning()  // Запускаем анимацию если ещё не запущена
+      this.startRunning()
     }
   }
   
-  /**
-   * 🔥 Проверка: двигается ли персонаж
-   */
+  stopMoving(): void {
+    console.log('✋ Остановка движения')
+    this.isMoving = false
+  }
+  
   isMovingForward(): boolean {
     return this.isMoving
   }
@@ -343,7 +346,7 @@ export class Player {
   playFall(onComplete?: () => void): void {
     this.onFallComplete = onComplete
     this.currentState = 'falling'
-    this.isMoving = false  // 🔥 Останавливаем движение
+    this.isMoving = false
     
     this.targetX = this.currentLane * this.LANE_WIDTH
     
@@ -373,10 +376,52 @@ export class Player {
     }
   }
   
+  /**
+   * 🔥 ИСПРАВЛЕНО: Увеличено время для полного завершения анимации
+   */
+  playBreakdance(onComplete?: () => void): void {
+    // Очищаем предыдущие таймеры
+    if (this.danceTimer) {
+      clearTimeout(this.danceTimer)
+      this.danceTimer = null
+    }
+    
+    this.onDanceComplete = onComplete
+    this.currentState = 'breakdance'
+    this.isMoving = false
+    
+    const danceAction = this.actions.get('breakdance')
+    if (danceAction) {
+      danceAction.time = 0
+      danceAction.reset()
+      this.playAnimation('breakdance', 0.3)
+      
+      let danceDuration = 3.5 // Длительность по умолчанию
+      if (danceAction.getClip()) {
+        danceDuration = danceAction.getClip().duration
+        console.log(`⏱️ Длительность Breakdance: ${danceDuration.toFixed(2)}s`)
+      }
+      
+      // 🔥 Увеличиваем время на 500мс для плавного перехода
+      const totalWaitTime = (danceDuration * 1000) + 500
+      
+      this.danceTimer = window.setTimeout(() => {
+        this.danceTimer = null
+        console.log('💃 Breakdance завершён')
+        if (this.onDanceComplete) this.onDanceComplete()
+      }, totalWaitTime)
+    } else {
+      console.warn('⚠️ Анимация Breakdance не найдена, использую заглушку')
+      setTimeout(() => {
+        if (this.onDanceComplete) this.onDanceComplete()
+      }, 4000) // Увеличено до 4 секунд
+    }
+  }
+  
   playDance(onComplete?: () => void): void {
     this.onDanceComplete = onComplete
     this.currentState = 'dancing'
-    this.isMoving = false  // 🔥 Останавливаем движение
+    this.isMoving = false
     
     const danceAction = this.actions.get('dance')
     if (danceAction) {
@@ -395,6 +440,10 @@ export class Player {
     if (this.fallTimer) {
       clearTimeout(this.fallTimer)
       this.fallTimer = null
+    }
+    if (this.danceTimer) {
+      clearTimeout(this.danceTimer)
+      this.danceTimer = null
     }
     this.actions.forEach(action => {
       action.stop()
@@ -415,16 +464,13 @@ export class Player {
     }
   }
   
-  /**
-   * 🔥 🔥 ИСПРАВЛЕНО: Движение только если isMoving = true
-   */
   update(delta: number): void {
     if (this.mixer) {
       this.mixer.update(delta)
     }
     
-    // 🔥 Двигаемся вперёд ТОЛЬКО если isMoving = true
-    if (this.isMoving && this.currentState !== 'falling') {
+    // Двигаемся вперёд ТОЛЬКО если isMoving = true и не падаем/не танцуем
+    if (this.isMoving && this.currentState !== 'falling' && this.currentState !== 'breakdance' && this.currentState !== 'dancing') {
       this.mesh.position.z += this.FORWARD_SPEED * 60 * delta
     }
     
