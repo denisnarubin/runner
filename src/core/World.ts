@@ -1,6 +1,8 @@
 // src/core/World.ts
 import * as THREE from 'three'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
+import { Gate } from './Gate'
+import type { GateModifier, GatePairLayout } from './Gate' // 🔥 Добавлен GatePairLayout
 
 export class World {
   private scene: THREE.Scene
@@ -12,14 +14,14 @@ export class World {
 
   private readonly CHUNK_SPAWN_DISTANCE = 200
   private readonly CHUNK_REMOVE_DISTANCE = 150
-  private readonly MAX_CHUNKS = 50            // увеличено для предотвращения раннего удаления
+  private readonly MAX_CHUNKS = 50
   private readonly INITIAL_CHUNKS = 25
 
   // Параметры для бомб
-  private readonly MAX_BOMBS_PER_CHUNK = 3
-  private readonly MIN_SAFE_DISTANCE_BOMB = 2.5      // между бомбами
-  private readonly MIN_DISTANCE_COIN_BOMB = 1.2      // между монетой и бомбой
-  private readonly BOMB_SPAWN_CHANCE = 0.7
+  private readonly MAX_BOMBS_PER_CHUNK = 2
+  private readonly MIN_SAFE_DISTANCE_BOMB = 2.5
+  private readonly MIN_DISTANCE_COIN_BOMB = 1.2
+  private readonly BOMB_SPAWN_CHANCE = 0.5
 
   // Параметры для монет
   private readonly COINS_PER_ROW = 5
@@ -27,16 +29,22 @@ export class World {
   private readonly CHANCE_FOR_2_ROWS = 0.4
   private readonly CHANCE_FOR_3_ROWS = 0.2
 
+  // 🔥 Параметры для ворот
+  private readonly GATE_SPAWN_CHANCE = 0.4
+  private readonly MIN_DISTANCE_FROM_BOMB = 3.0
+
+  // 🔥 Состояние чередования лейаута ворот
+  private currentGateLayout: GatePairLayout = 'plus-left'
+
   private bombModel: THREE.Object3D | null = null
   private coinModel: THREE.Object3D | null = null
 
-  private _respawnDone = false   // флаг для однократного пересоздания объектов
+  private _respawnDone = false
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
     this.spawnZ = 0
 
-    // Создаём начальные чанки
     for (let i = 0; i < this.INITIAL_CHUNKS; i++) {
       const zPos = i * this.chunkLength
       this.createChunk(zPos)
@@ -47,7 +55,6 @@ export class World {
       chunk.visible = true
     })
 
-    // Загружаем модели параллельно
     Promise.all([
       new Promise<void>(resolve => this.loadBombModel(() => resolve())),
       new Promise<void>(resolve => this.loadCoinModel(() => resolve()))
@@ -72,19 +79,33 @@ export class World {
     this.scene.add(roadLight)
   }
 
-  /**
-   * Пересоздаёт объекты после загрузки моделей (только один раз)
-   */
+  clearAllObjects(): void {
+    console.log('🧹 Очистка всех объектов мира...')
+    let removedCount = 0
+    
+    this.chunks.forEach((chunk) => {
+      for (let i = chunk.children.length - 1; i >= 0; i--) {
+        const child = chunk.children[i]
+        if ((child as any).type === 'bomb' || (child as any).type === 'coin' || (child as any).type === 'gate') {
+          chunk.remove(child)
+          removedCount++
+        }
+      }
+    })
+    
+    console.log(`✅ Удалено объектов: ${removedCount}`)
+  }
+
   private respawnObjectsAfterLoad(): void {
     console.log('🔄 Пересоздаю объекты в существующих чанках...')
     let totalCoins = 0
     let totalBombs = 0
+    let totalGates = 0
 
     this.chunks.forEach(chunk => {
-      // Удаляем старые объекты
       for (let i = chunk.children.length - 1; i >= 0; i--) {
         const child = chunk.children[i]
-        if ((child as any).type === 'bomb' || (child as any).type === 'coin') {
+        if ((child as any).type === 'bomb' || (child as any).type === 'coin' || (child as any).type === 'gate') {
           chunk.remove(child)
         }
       }
@@ -92,14 +113,12 @@ export class World {
       const count = this.spawnObjectsInChunk(chunk)
       totalCoins += count.coins
       totalBombs += count.bombs
+      totalGates += count.gates
     })
 
-    console.log(`✅ Чанков обновлено: ${this.chunks.length}, Монет: ${totalCoins}, Бомб: ${totalBombs}`)
+    console.log(`✅ Чанков обновлено: ${this.chunks.length}, Монет: ${totalCoins}, Бомб: ${totalBombs}, Ворот: ${totalGates}`)
   }
 
-  /**
-   * Загружает модель монеты
-   */
   private loadCoinModel(onReady: () => void): void {
     const loader = new FBXLoader()
     loader.crossOrigin = 'anonymous'
@@ -174,9 +193,6 @@ export class World {
     )
   }
 
-  /**
-   * Загружает модель бомбы
-   */
   private loadBombModel(onReady: () => void): void {
     const loader = new FBXLoader()
     loader.crossOrigin = 'anonymous'
@@ -372,9 +388,35 @@ export class World {
     this.bombModel = group
   }
 
-  /**
-   * Создание нового чанка
-   */
+  private generateRandomModifier(): GateModifier {
+    const types: ('+' | '-' | 'x')[] = ['+', '-', 'x']
+    const type = types[Math.floor(Math.random() * types.length)]
+    
+    let value: number
+    switch (type) {
+      case '+':
+        value = Math.floor(Math.random() * 10) + 1
+        break
+      case '-':
+        value = Math.floor(Math.random() * 10) + 1
+        break
+      case 'x':
+        value = Math.floor(Math.random() * 3) + 2
+        break
+    }
+    
+    return { type, value }
+  }
+
+  private canPlaceGate(zOffset: number, bombPositions: { lane: number, z: number }[]): boolean {
+    for (const bomb of bombPositions) {
+      if (Math.abs(bomb.z - zOffset) < this.MIN_DISTANCE_FROM_BOMB) {
+        return false
+      }
+    }
+    return true
+  }
+
   private createChunk(zPosition: number): void {
     const chunk = new THREE.Group()
 
@@ -393,7 +435,6 @@ export class World {
     road.name = 'road'
     chunk.add(road)
 
-    // Спавним объекты с локальными смещениями
     this.spawnObjectsInChunk(chunk)
 
     chunk.position.z = zPosition
@@ -403,19 +444,14 @@ export class World {
     this.chunks.push(chunk)
   }
 
-  /**
-   * Основная логика спавна объектов в чанке.
-   * Монеты располагаются рядами, бомбы проверяют коллизии с монетами и другими бомбами.
-   */
-  private spawnObjectsInChunk(parent: THREE.Group): { coins: number, bombs: number } {
+  private spawnObjectsInChunk(parent: THREE.Group): { coins: number, bombs: number, gates: number } {
     let coinCount = 0
     let bombCount = 0
+    let gateCount = 0
 
-    // Массивы для отслеживания позиций уже размещённых объектов
     const coinPositions: { lane: number, z: number }[] = []
     const bombPositions: { lane: number, z: number }[] = []
 
-    // Определяем количество рядов монет
     const rand = Math.random()
     let rowsOfCoins = 1
     if (rand < this.CHANCE_FOR_1_ROW) {
@@ -426,12 +462,10 @@ export class World {
       rowsOfCoins = 3
     }
 
-    // Спавн монет
     const coinSpacing = this.chunkLength / (this.COINS_PER_ROW + 1)
     const availableLanes = [-1, 0, 1]
     const selectedLanes: number[] = []
 
-    // Выбираем случайные полосы для монет
     for (let i = 0; i < rowsOfCoins; i++) {
       if (availableLanes.length === 0) break
       const randomIndex = Math.floor(Math.random() * availableLanes.length)
@@ -440,29 +474,27 @@ export class World {
     }
     selectedLanes.sort((a, b) => a - b)
 
-    // Спавним монеты и запоминаем их позиции
     for (const lane of selectedLanes) {
       for (let i = 1; i <= this.COINS_PER_ROW; i++) {
         const zOffset = i * coinSpacing - this.chunkLength / 2
-        this.spawnCoin(parent, lane, zOffset)
-        coinPositions.push({ lane, z: zOffset })
-        coinCount++
+        const coin = this.spawnCoin(parent, lane, zOffset)
+        if (coin) {
+          coinPositions.push({ lane, z: zOffset })
+          coinCount++
+        }
       }
     }
 
-    // Умный спавн бомб – проверяем как бомбы, так и монеты
     if (Math.random() < this.BOMB_SPAWN_CHANCE) {
       const bombsToSpawn = Math.floor(Math.random() * this.MAX_BOMBS_PER_CHUNK) + 1
 
       for (let b = 0; b < bombsToSpawn; b++) {
         let spawned = false
 
-        // Пытаемся найти безопасную позицию (до 30 попыток)
         for (let attempt = 0; attempt < 30; attempt++) {
           const lane = Math.floor(Math.random() * 3) - 1
           const zOffset = (Math.random() * (this.chunkLength - 6)) + 3 - this.chunkLength / 2
 
-          // Проверка на другие бомбы
           let tooCloseToBomb = false
           for (const pos of bombPositions) {
             if (pos.lane === lane) {
@@ -475,7 +507,6 @@ export class World {
           }
           if (tooCloseToBomb) continue
 
-          // Проверка на монеты (чтобы не накладывались)
           let tooCloseToCoin = false
           for (const pos of coinPositions) {
             if (pos.lane === lane) {
@@ -488,61 +519,55 @@ export class World {
           }
           if (tooCloseToCoin) continue
 
-          // Проверка на блокировку прохода (только между бомбами)
           if (!this.isPathClear(parent, lane, zOffset)) continue
 
-          // Всё хорошо, спавним
-          this.spawnBomb(parent, lane, zOffset)
-          bombPositions.push({ lane, z: zOffset })
-          bombCount++
-          spawned = true
-          break
-        }
-
-        // Если не удалось найти позицию, пробуем последний вариант – ставим на свободной полосе,
-        // но стараемся избегать монет
-        if (!spawned) {
-          const usedLanes = bombPositions.map(p => p.lane)
-          const availableLanes = [-1, 0, 1].filter(l => !usedLanes.includes(l))
-          if (availableLanes.length > 0) {
-            const lane = availableLanes[0]
-            // Ищем z, где нет монет
-            let found = false
-            for (let attempt = 0; attempt < 10; attempt++) {
-              const zOffset = (Math.random() * 10 - 5)
-              let coinConflict = false
-              for (const pos of coinPositions) {
-                if (pos.lane === lane && Math.abs(pos.z - zOffset) < this.MIN_DISTANCE_COIN_BOMB) {
-                  coinConflict = true
-                  break
-                }
-              }
-              if (!coinConflict) {
-                this.spawnBomb(parent, lane, zOffset)
-                bombPositions.push({ lane, z: zOffset })
-                bombCount++
-                found = true
-                break
-              }
-            }
-            if (!found) {
-              // совсем не получилось – ставим в центр полосы
-              const zOffset = 0
-              this.spawnBomb(parent, lane, zOffset)
-              bombPositions.push({ lane, z: zOffset })
-              bombCount++
-            }
+          const bomb = this.spawnBomb(parent, lane, zOffset)
+          if (bomb) {
+            bombPositions.push({ lane, z: zOffset })
+            bombCount++
+            spawned = true
           }
+          break
         }
       }
     }
 
-    return { coins: coinCount, bombs: bombCount }
+    // 🔥 Спавн ПАРНЫХ ворот с чередованием лейаута
+    if (Math.random() < this.GATE_SPAWN_CHANCE) {
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const zOffset = (Math.random() * (this.chunkLength - 8)) + 4 - this.chunkLength / 2
+        
+        if (this.canPlaceGate(zOffset, bombPositions)) {
+          // 🔥 Создаём парные ворота с текущим лейаутом
+          const gate = new Gate(
+            { type: '+', value: 1 }, // заглушка, не используется в парном режиме
+            zOffset, 
+            this.currentGateLayout, // 🔥 Передаём GatePairLayout вместо GatePosition
+            true // isPaired = true
+          )
+          
+          const gateMesh = gate.getMesh()
+          
+          ;(gateMesh as any).type = 'gate'
+          ;(gateMesh as any).gate = gate // 🔥 Сохраняем ссылку на объект Gate для коллизий
+          ;(gateMesh as any).zOffset = zOffset
+          ;(gateMesh as any).isPaired = true
+          
+          parent.add(gateMesh)
+          gateCount++
+          
+          console.log(`🚪 Созданы парные ворота: левая=${gate.getModifier('left')?.type}${gate.getModifier('left')?.value}, правая=${gate.getModifier('right')?.type}${gate.getModifier('right')?.value} на Z=${zOffset.toFixed(2)}`)
+          
+          // 🔥 Чередуем лейаут для следующих ворот
+          this.currentGateLayout = Gate.getNextLayout(this.currentGateLayout)
+          break
+        }
+      }
+    }
+
+    return { coins: coinCount, bombs: bombCount, gates: gateCount }
   }
 
-  /**
-   * Проверка, что бомба не блокирует проход вместе с другими бомбами
-   */
   private isPathClear(parent: THREE.Group, bombLane: number, bombZ: number): boolean {
     for (let i = 0; i < parent.children.length; i++) {
       const child = parent.children[i]
@@ -550,14 +575,12 @@ export class World {
         const objPos = child.position
         const otherLane = Math.round(objPos.x / this.laneWidth)
 
-        // Если бомбы на одной полосе слишком близко – плохо
         if (otherLane === bombLane) {
           if (Math.abs(objPos.z - bombZ) < this.MIN_SAFE_DISTANCE_BOMB) {
             return false
           }
         }
 
-        // Если бомбы на соседних полосах и почти на одной Z – это стена
         if (Math.abs(otherLane - bombLane) === 1) {
           if (Math.abs(objPos.z - bombZ) < 1.5) {
             return false
@@ -568,12 +591,11 @@ export class World {
     return true
   }
 
-  /**
-   * Создаёт монету (локальные координаты)
-   */
-  private spawnCoin(parent: THREE.Group, lane: number, zOffset: number): void {
+  private spawnCoin(parent: THREE.Group, lane: number, zOffset: number): THREE.Object3D | null {
+    let coin: THREE.Object3D
+    
     if (this.coinModel) {
-      const coin = this.coinModel.clone()
+      coin = this.coinModel.clone()
       coin.position.set(lane * this.laneWidth, 1.2, zOffset)
       coin.castShadow = true
       coin.receiveShadow = true
@@ -581,6 +603,7 @@ export class World {
       ;(coin as any).scoreValue = 1
       ;(coin as any).initialRotation = Math.random() * Math.PI * 2
       parent.add(coin)
+      return coin
     } else {
       const coinGeo = new THREE.CylinderGeometry(0.4, 0.4, 0.1, 16)
       const coinMat = new THREE.MeshStandardMaterial({
@@ -590,7 +613,7 @@ export class World {
         metalness: 1.0,
         roughness: 0.0
       })
-      const coin = new THREE.Mesh(coinGeo, coinMat)
+      coin = new THREE.Mesh(coinGeo, coinMat)
       coin.position.set(lane * this.laneWidth, 1.2, zOffset)
       coin.castShadow = true
       coin.receiveShadow = true
@@ -598,13 +621,11 @@ export class World {
       ;(coin as any).type = 'coin'
       ;(coin as any).scoreValue = 1
       parent.add(coin)
+      return coin
     }
   }
 
-  /**
-   * Создаёт бомбу (локальные координаты)
-   */
-  private spawnBomb(parent: THREE.Group, lane: number, zOffset: number): void {
+  private spawnBomb(parent: THREE.Group, lane: number, zOffset: number): THREE.Object3D | null {
     if (!this.bombModel) {
       console.warn('⚠️ bombModel не загрузилась, создаю заглушку')
       this.createFallbackBomb()
@@ -624,14 +645,12 @@ export class World {
       ;(bomb as any).type = 'bomb'
       bomb.rotation.y = Math.random() * Math.PI * 2
       parent.add(bomb)
+      return bomb
     }
+    return null
   }
 
-  /**
-   * Обновление состояния мира: спавн новых чанков, анимация монет, удаление старых чанков
-   */
   update(playerZ: number): void {
-    // Спавн новых чанков впереди игрока
     if (this.chunks.length > 0) {
       let lastChunk = this.chunks[this.chunks.length - 1]
       let lastChunkEndZ = lastChunk.position.z + this.chunkLength
@@ -646,7 +665,6 @@ export class World {
       }
     }
 
-    // Анимация монет (вращение и покачивание)
     this.chunks.forEach((chunk) => {
       chunk.children.forEach((child: any) => {
         if (child.type === 'coin') {
@@ -656,7 +674,6 @@ export class World {
       })
     })
 
-    // Удаление старых чанков позади игрока
     for (let i = this.chunks.length - 1; i >= 0; i--) {
       const chunk = this.chunks[i]
       const chunkEndZ = chunk.position.z + this.chunkLength
@@ -681,7 +698,6 @@ export class World {
       }
     }
 
-    // Защита от переполнения (если вдруг чанков стало слишком много)
     if (this.chunks.length > this.MAX_CHUNKS) {
       console.warn(`⚠️ Превышен лимит чанков (${this.chunks.length} > ${this.MAX_CHUNKS}), удаляем старые`)
       const toRemove = this.chunks.length - this.MAX_CHUNKS
@@ -706,18 +722,15 @@ export class World {
     }
   }
 
-  /**
-   * Возвращает все активные объекты (монеты, бомбы, ворота) для проверки столкновений
-   */
-  getActiveObjects(): Array<THREE.Mesh> {
-    const objects: Array<THREE.Mesh> = []
+  getActiveObjects(): Array<THREE.Object3D> {
+    const objects: Array<THREE.Object3D> = []
 
     this.chunks.forEach((chunk) => {
       chunk.children.forEach((child) => {
         if ((child as any).type === 'coin' ||
-          (child as any).type === 'bomb' ||
-          (child as any).type === 'gate') {
-          objects.push(child as THREE.Mesh)
+            (child as any).type === 'bomb' ||
+            (child as any).type === 'gate') {
+          objects.push(child)
         }
       })
     })
@@ -725,24 +738,35 @@ export class World {
     return objects
   }
 
-  /**
-   * Удаляет конкретный объект (после сбора или взрыва)
-   */
-  removeObject(obj: THREE.Mesh): void {
+  removeObject(obj: THREE.Object3D): void {
     this.chunks.forEach((chunk) => {
-      const index = chunk.children.indexOf(obj as any)
+      const index = chunk.children.indexOf(obj)
       if (index > -1) {
-        chunk.remove(obj as any)
-        const mesh = obj as any
-        if (mesh.geometry) {
-          mesh.geometry.dispose()
-        }
-        if (mesh.material) {
-          if (Array.isArray(mesh.material)) {
-            mesh.material.forEach((m: any) => m && m.dispose())
-          } else {
-            mesh.material.dispose()
+        chunk.remove(obj)
+        
+        if (obj instanceof THREE.Mesh) {
+          if (obj.geometry) obj.geometry.dispose()
+          if (obj.material) {
+            if (Array.isArray(obj.material)) {
+              obj.material.forEach((m: any) => m && m.dispose())
+            } else {
+              obj.material.dispose()
+            }
           }
+        } 
+        else if (obj instanceof THREE.Group) {
+          obj.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              if (child.geometry) child.geometry.dispose()
+              if (child.material) {
+                if (Array.isArray(child.material)) {
+                  child.material.forEach(m => m && m.dispose())
+                } else {
+                  child.material.dispose()
+                }
+              }
+            }
+          })
         }
       }
     })
