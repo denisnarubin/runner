@@ -1,8 +1,7 @@
-// src/core/World.ts
 import * as THREE from 'three'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { Gate } from './Gate'
-import type { GateModifier, GatePairLayout } from './Gate' // 🔥 Добавлен GatePairLayout
+import type { GateModifier, GatePairLayout } from './Gate'
 
 export class World {
   private scene: THREE.Scene
@@ -11,50 +10,45 @@ export class World {
   private laneWidth = 1.8
   private spawnZ = 0
   private lastChunkZ = 0
-
   private readonly CHUNK_SPAWN_DISTANCE = 200
   private readonly CHUNK_REMOVE_DISTANCE = 150
   private readonly MAX_CHUNKS = 50
   private readonly INITIAL_CHUNKS = 25
-
+  
   // Параметры для бомб
   private readonly MAX_BOMBS_PER_CHUNK = 2
   private readonly MIN_SAFE_DISTANCE_BOMB = 2.5
   private readonly MIN_DISTANCE_COIN_BOMB = 1.2
   private readonly BOMB_SPAWN_CHANCE = 0.5
-
+  private readonly SAFE_START_ZONE = 40
+  
   // Параметры для монет
   private readonly COINS_PER_ROW = 5
   private readonly CHANCE_FOR_1_ROW = 0.4
   private readonly CHANCE_FOR_2_ROWS = 0.4
   private readonly CHANCE_FOR_3_ROWS = 0.2
-
-  // 🔥 Параметры для ворот
-  private readonly GATE_SPAWN_CHANCE = 0.4
+  
+  // Параметры для ворот
+  private readonly GATE_SPAWN_CHANCE = 0.15
   private readonly MIN_DISTANCE_FROM_BOMB = 3.0
-
-  // 🔥 Состояние чередования лейаута ворот
+  
+  // Состояние чередования лейаута ворот
   private currentGateLayout: GatePairLayout = 'plus-left'
-
   private bombModel: THREE.Object3D | null = null
   private coinModel: THREE.Object3D | null = null
-
   private _respawnDone = false
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
     this.spawnZ = 0
-
     for (let i = 0; i < this.INITIAL_CHUNKS; i++) {
       const zPos = i * this.chunkLength
       this.createChunk(zPos)
       this.lastChunkZ = Math.max(this.lastChunkZ, zPos)
     }
-
     this.chunks.forEach(chunk => {
       chunk.visible = true
     })
-
     Promise.all([
       new Promise<void>(resolve => this.loadBombModel(() => resolve())),
       new Promise<void>(resolve => this.loadCoinModel(() => resolve()))
@@ -67,12 +61,12 @@ export class World {
         }
       }, 100)
     })
-
+    
     const bombLight = new THREE.PointLight(0xff6666, 0.6, 20)
     bombLight.position.set(0, 8, 5)
     bombLight.castShadow = false
     this.scene.add(bombLight)
-
+    
     const roadLight = new THREE.PointLight(0xffffff, 2.0, 100)
     roadLight.position.set(0, 15, 0)
     roadLight.castShadow = false
@@ -82,7 +76,6 @@ export class World {
   clearAllObjects(): void {
     console.log('🧹 Очистка всех объектов мира...')
     let removedCount = 0
-    
     this.chunks.forEach((chunk) => {
       for (let i = chunk.children.length - 1; i >= 0; i--) {
         const child = chunk.children[i]
@@ -92,7 +85,6 @@ export class World {
         }
       }
     })
-    
     console.log(`✅ Удалено объектов: ${removedCount}`)
   }
 
@@ -101,7 +93,6 @@ export class World {
     let totalCoins = 0
     let totalBombs = 0
     let totalGates = 0
-
     this.chunks.forEach(chunk => {
       for (let i = chunk.children.length - 1; i >= 0; i--) {
         const child = chunk.children[i]
@@ -109,13 +100,11 @@ export class World {
           chunk.remove(child)
         }
       }
-
       const count = this.spawnObjectsInChunk(chunk)
       totalCoins += count.coins
       totalBombs += count.bombs
       totalGates += count.gates
     })
-
     console.log(`✅ Чанков обновлено: ${this.chunks.length}, Монет: ${totalCoins}, Бомб: ${totalBombs}, Ворот: ${totalGates}`)
   }
 
@@ -123,16 +112,13 @@ export class World {
     const loader = new FBXLoader()
     loader.crossOrigin = 'anonymous'
     console.log('⏳ Загрузка модели монеты: /models/Coin_Reskin.fbx')
-
     loader.load(
       '/models/Coin_Reskin.fbx',
       (object: THREE.Object3D) => {
         console.log('✅ Модель монеты загружена!')
         object.scale.set(0.8, 0.8, 0.8)
-
         const textureLoader = new THREE.TextureLoader()
         textureLoader.crossOrigin = 'anonymous'
-
         textureLoader.load(
           '/textures/coin.png',
           (texture) => {
@@ -141,7 +127,6 @@ export class World {
             texture.wrapS = THREE.RepeatWrapping
             texture.wrapT = THREE.RepeatWrapping
             texture.needsUpdate = true
-
             object.traverse((child) => {
               if (child instanceof THREE.Mesh && child.isMesh) {
                 child.castShadow = true
@@ -157,7 +142,6 @@ export class World {
                 child.material = material
               }
             })
-
             this.coinModel = object
             console.log('🪙 Модель монеты готова!')
             onReady()
@@ -196,7 +180,6 @@ export class World {
   private loadBombModel(onReady: () => void): void {
     const loader = new FBXLoader()
     loader.crossOrigin = 'anonymous'
-
     loader.load(
       '/models/tnt_barrel_large.fbx',
       (object: THREE.Object3D) => {
@@ -206,22 +189,18 @@ export class World {
         box.getSize(size)
         console.log('📏 Размер модели:', size)
         object.scale.set(0.01, 0.01, 0.01)
-
         const textureLoader = new THREE.TextureLoader()
         textureLoader.crossOrigin = 'anonymous'
-
         const texturePaths = {
           albedo: '/textures/explosives_texture.png',
           roughness: '/textures/explosives_rough.png',
           glow: '/textures/explosives_glow.png'
         }
-
         textureLoader.load(
           texturePaths.albedo,
           (albedoTexture) => {
             console.log('✅ Albedo текстура загружена!')
             this.setupTexture(albedoTexture, true)
-
             textureLoader.load(
               texturePaths.roughness,
               (roughTexture) => {
@@ -280,7 +259,6 @@ export class World {
       if (child instanceof THREE.Mesh && child.isMesh) {
         child.castShadow = true
         child.receiveShadow = true
-
         const material = new THREE.MeshStandardMaterial({
           map: albedo,
           color: 0xffffff,
@@ -293,7 +271,6 @@ export class World {
           envMapIntensity: 0.5,
           side: THREE.FrontSide
         })
-
         material.needsUpdate = true
         if (material.map) {
           material.map.needsUpdate = true
@@ -301,7 +278,6 @@ export class World {
         }
         if (material.roughnessMap) material.roughnessMap.needsUpdate = true
         if (material.emissiveMap) material.emissiveMap.needsUpdate = true
-
         child.material = material
       }
     })
@@ -319,7 +295,6 @@ export class World {
       if (child instanceof THREE.Mesh && child.isMesh) {
         child.castShadow = true
         child.receiveShadow = true
-
         const material = new THREE.MeshStandardMaterial({
           color: colorHex,
           emissive: 0x661111,
@@ -328,7 +303,6 @@ export class World {
           metalness: 0.8,
           envMapIntensity: 0.6
         })
-
         material.needsUpdate = true
         child.material = material
       }
@@ -339,7 +313,6 @@ export class World {
   private createFallbackBomb(): void {
     console.warn('🔧 Создаю бомбу-заглушку')
     const group = new THREE.Group()
-
     const barrelMat = new THREE.MeshStandardMaterial({
       color: 0xff4444,
       emissive: 0xaa2222,
@@ -347,30 +320,25 @@ export class World {
       roughness: 0.3,
       metalness: 0.7
     })
-
     const barrelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.6, 16)
     const barrel = new THREE.Mesh(barrelGeo, barrelMat)
     barrel.rotation.x = Math.PI / 2
     barrel.castShadow = true
     barrel.receiveShadow = true
     group.add(barrel)
-
     const hoopMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.9 })
     const hoopGeo = new THREE.TorusGeometry(0.32, 0.04, 8, 16)
-
     const hoop1 = new THREE.Mesh(hoopGeo, hoopMat)
     hoop1.rotation.x = Math.PI / 2
     hoop1.position.z = -0.15
     hoop1.castShadow = true
     hoop1.receiveShadow = true
     group.add(hoop1)
-
     const hoop2 = hoop1.clone()
     hoop2.position.z = 0.15
     hoop2.castShadow = true
     hoop2.receiveShadow = true
     group.add(hoop2)
-
     const fuseMat = new THREE.MeshStandardMaterial({
       color: 0xffaa00,
       emissive: 0xff6600,
@@ -383,7 +351,6 @@ export class World {
     fuse.castShadow = true
     fuse.receiveShadow = true
     group.add(fuse)
-
     group.scale.set(1, 1, 1)
     this.bombModel = group
   }
@@ -391,7 +358,6 @@ export class World {
   private generateRandomModifier(): GateModifier {
     const types: ('+' | '-' | 'x')[] = ['+', '-', 'x']
     const type = types[Math.floor(Math.random() * types.length)]
-    
     let value: number
     switch (type) {
       case '+':
@@ -404,7 +370,6 @@ export class World {
         value = Math.floor(Math.random() * 3) + 2
         break
     }
-    
     return { type, value }
   }
 
@@ -417,9 +382,12 @@ export class World {
     return true
   }
 
+  private isInSafeStartZone(globalZ: number): boolean {
+    return globalZ < this.SAFE_START_ZONE
+  }
+
   private createChunk(zPosition: number): void {
     const chunk = new THREE.Group()
-
     const roadGeo = new THREE.PlaneGeometry(5.5, this.chunkLength)
     const roadMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
@@ -434,9 +402,7 @@ export class World {
     road.receiveShadow = true
     road.name = 'road'
     chunk.add(road)
-
     this.spawnObjectsInChunk(chunk)
-
     chunk.position.z = zPosition
     chunk.name = `chunk_z${zPosition}`
     chunk.visible = true
@@ -448,10 +414,9 @@ export class World {
     let coinCount = 0
     let bombCount = 0
     let gateCount = 0
-
     const coinPositions: { lane: number, z: number }[] = []
     const bombPositions: { lane: number, z: number }[] = []
-
+    const chunkGlobalZ = parent.position.z
     const rand = Math.random()
     let rowsOfCoins = 1
     if (rand < this.CHANCE_FOR_1_ROW) {
@@ -461,11 +426,9 @@ export class World {
     } else {
       rowsOfCoins = 3
     }
-
     const coinSpacing = this.chunkLength / (this.COINS_PER_ROW + 1)
     const availableLanes = [-1, 0, 1]
     const selectedLanes: number[] = []
-
     for (let i = 0; i < rowsOfCoins; i++) {
       if (availableLanes.length === 0) break
       const randomIndex = Math.floor(Math.random() * availableLanes.length)
@@ -473,7 +436,6 @@ export class World {
       selectedLanes.push(lane)
     }
     selectedLanes.sort((a, b) => a - b)
-
     for (const lane of selectedLanes) {
       for (let i = 1; i <= this.COINS_PER_ROW; i++) {
         const zOffset = i * coinSpacing - this.chunkLength / 2
@@ -484,17 +446,17 @@ export class World {
         }
       }
     }
-
     if (Math.random() < this.BOMB_SPAWN_CHANCE) {
       const bombsToSpawn = Math.floor(Math.random() * this.MAX_BOMBS_PER_CHUNK) + 1
-
       for (let b = 0; b < bombsToSpawn; b++) {
         let spawned = false
-
         for (let attempt = 0; attempt < 30; attempt++) {
           const lane = Math.floor(Math.random() * 3) - 1
           const zOffset = (Math.random() * (this.chunkLength - 6)) + 3 - this.chunkLength / 2
-
+          const bombGlobalZ = chunkGlobalZ + zOffset
+          if (this.isInSafeStartZone(bombGlobalZ)) {
+            continue
+          }
           let tooCloseToBomb = false
           for (const pos of bombPositions) {
             if (pos.lane === lane) {
@@ -506,7 +468,6 @@ export class World {
             }
           }
           if (tooCloseToBomb) continue
-
           let tooCloseToCoin = false
           for (const pos of coinPositions) {
             if (pos.lane === lane) {
@@ -518,9 +479,7 @@ export class World {
             }
           }
           if (tooCloseToCoin) continue
-
           if (!this.isPathClear(parent, lane, zOffset)) continue
-
           const bomb = this.spawnBomb(parent, lane, zOffset)
           if (bomb) {
             bombPositions.push({ lane, z: zOffset })
@@ -531,40 +490,30 @@ export class World {
         }
       }
     }
-
-    // 🔥 Спавн ПАРНЫХ ворот с чередованием лейаута
     if (Math.random() < this.GATE_SPAWN_CHANCE) {
       for (let attempt = 0; attempt < 20; attempt++) {
         const zOffset = (Math.random() * (this.chunkLength - 8)) + 4 - this.chunkLength / 2
-        
+        const gateGlobalZ = chunkGlobalZ + zOffset
+        if (this.isInSafeStartZone(gateGlobalZ)) {
+          continue
+        }
         if (this.canPlaceGate(zOffset, bombPositions)) {
-          // 🔥 Создаём парные ворота с текущим лейаутом
           const gate = new Gate(
-            { type: '+', value: 1 }, // заглушка, не используется в парном режиме
-            zOffset, 
-            this.currentGateLayout, // 🔥 Передаём GatePairLayout вместо GatePosition
-            true // isPaired = true
+            { type: '+', value: 1 },
+            zOffset,
+            this.currentGateLayout,
+            true
           )
-          
           const gateMesh = gate.getMesh()
-          
           ;(gateMesh as any).type = 'gate'
-          ;(gateMesh as any).gate = gate // 🔥 Сохраняем ссылку на объект Gate для коллизий
-          ;(gateMesh as any).zOffset = zOffset
-          ;(gateMesh as any).isPaired = true
-          
+          ;(gateMesh as any).gate = gate
           parent.add(gateMesh)
           gateCount++
-          
-          console.log(`🚪 Созданы парные ворота: левая=${gate.getModifier('left')?.type}${gate.getModifier('left')?.value}, правая=${gate.getModifier('right')?.type}${gate.getModifier('right')?.value} на Z=${zOffset.toFixed(2)}`)
-          
-          // 🔥 Чередуем лейаут для следующих ворот
           this.currentGateLayout = Gate.getNextLayout(this.currentGateLayout)
           break
         }
       }
     }
-
     return { coins: coinCount, bombs: bombCount, gates: gateCount }
   }
 
@@ -574,13 +523,11 @@ export class World {
       if ((child as any).type === 'bomb') {
         const objPos = child.position
         const otherLane = Math.round(objPos.x / this.laneWidth)
-
         if (otherLane === bombLane) {
           if (Math.abs(objPos.z - bombZ) < this.MIN_SAFE_DISTANCE_BOMB) {
             return false
           }
         }
-
         if (Math.abs(otherLane - bombLane) === 1) {
           if (Math.abs(objPos.z - bombZ) < 1.5) {
             return false
@@ -593,7 +540,6 @@ export class World {
 
   private spawnCoin(parent: THREE.Group, lane: number, zOffset: number): THREE.Object3D | null {
     let coin: THREE.Object3D
-    
     if (this.coinModel) {
       coin = this.coinModel.clone()
       coin.position.set(lane * this.laneWidth, 1.2, zOffset)
@@ -602,6 +548,7 @@ export class World {
       ;(coin as any).type = 'coin'
       ;(coin as any).scoreValue = 1
       ;(coin as any).initialRotation = Math.random() * Math.PI * 2
+      ;(coin as any).isCollected = false // 🔥 Флаг сбора
       parent.add(coin)
       return coin
     } else {
@@ -620,6 +567,7 @@ export class World {
       coin.rotation.x = Math.PI / 2
       ;(coin as any).type = 'coin'
       ;(coin as any).scoreValue = 1
+      ;(coin as any).isCollected = false // 🔥 Флаг сбора
       parent.add(coin)
       return coin
     }
@@ -630,7 +578,6 @@ export class World {
       console.warn('⚠️ bombModel не загрузилась, создаю заглушку')
       this.createFallbackBomb()
     }
-
     if (this.bombModel) {
       const bomb = this.bombModel.clone()
       bomb.traverse((child) => {
@@ -639,7 +586,6 @@ export class World {
           child.receiveShadow = true
         }
       })
-
       bomb.position.set(lane * this.laneWidth, 0.5, zOffset)
       bomb.visible = true
       ;(bomb as any).type = 'bomb'
@@ -654,33 +600,27 @@ export class World {
     if (this.chunks.length > 0) {
       let lastChunk = this.chunks[this.chunks.length - 1]
       let lastChunkEndZ = lastChunk.position.z + this.chunkLength
-
       while (playerZ + this.CHUNK_SPAWN_DISTANCE > lastChunkEndZ) {
         const newChunkZ = lastChunkEndZ
         this.createChunk(newChunkZ)
         this.lastChunkZ = newChunkZ
-
         lastChunk = this.chunks[this.chunks.length - 1]
         lastChunkEndZ = lastChunk.position.z + this.chunkLength
       }
     }
-
     this.chunks.forEach((chunk) => {
       chunk.children.forEach((child: any) => {
-        if (child.type === 'coin') {
+        if (child.type === 'coin' && !child.isCollected) {
           child.rotation.y += 0.03
           child.position.y = 1.2 + Math.sin(Date.now() * 0.003 + child.initialRotation) * 0.1
         }
       })
     })
-
     for (let i = this.chunks.length - 1; i >= 0; i--) {
       const chunk = this.chunks[i]
       const chunkEndZ = chunk.position.z + this.chunkLength
-
       if (chunkEndZ < playerZ - this.CHUNK_REMOVE_DISTANCE) {
         this.scene.remove(chunk)
-
         chunk.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             if (child.geometry) child.geometry.dispose()
@@ -693,11 +633,9 @@ export class World {
             }
           }
         })
-
         this.chunks.splice(i, 1)
       }
     }
-
     if (this.chunks.length > this.MAX_CHUNKS) {
       console.warn(`⚠️ Превышен лимит чанков (${this.chunks.length} > ${this.MAX_CHUNKS}), удаляем старые`)
       const toRemove = this.chunks.length - this.MAX_CHUNKS
@@ -724,7 +662,6 @@ export class World {
 
   getActiveObjects(): Array<THREE.Object3D> {
     const objects: Array<THREE.Object3D> = []
-
     this.chunks.forEach((chunk) => {
       chunk.children.forEach((child) => {
         if ((child as any).type === 'coin' ||
@@ -734,7 +671,6 @@ export class World {
         }
       })
     })
-
     return objects
   }
 
@@ -743,7 +679,6 @@ export class World {
       const index = chunk.children.indexOf(obj)
       if (index > -1) {
         chunk.remove(obj)
-        
         if (obj instanceof THREE.Mesh) {
           if (obj.geometry) obj.geometry.dispose()
           if (obj.material) {
@@ -753,8 +688,7 @@ export class World {
               obj.material.dispose()
             }
           }
-        } 
-        else if (obj instanceof THREE.Group) {
+        } else if (obj instanceof THREE.Group) {
           obj.traverse((child) => {
             if (child instanceof THREE.Mesh) {
               if (child.geometry) child.geometry.dispose()
