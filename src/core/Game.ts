@@ -87,6 +87,9 @@ export class Game {
     this.setupControls();
     this.createCoinCounter();
     
+    // Добавляем слушатель изменения размера окна для адаптации счетчика
+    window.addEventListener('resize', () => this.updateCoinCounterStyles());
+    
     // 🔥 Предзагрузка звуков
     this.preloadSounds();
   }
@@ -105,65 +108,29 @@ export class Game {
     });
   }
 
+  // 🔥 АДАПТИВНЫЙ СЧЕТЧИК с исправленными брейкпоинтами
   private createCoinCounter(): void {
-    // 🔥 КОНТЕЙНЕР С УВЕЛИЧЕННЫМ ОТСТУПОМ СВЕРХУ
+    // Контейнер с адаптивными стилями
     const container = document.createElement('div');
-    container.style.cssText = `
-      position: fixed;
-      top: 50px;
-      left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
-      border-radius: 24px;
-      padding: 5px 28px 5px 0;
-      height: 40px;
-      min-width: 150px;
-      box-shadow: 0 4px 14px rgba(255, 107, 107, 0.5);
-      z-index: 100;
-      font-family: 'Arial', sans-serif;
-      pointer-events: none;
-      overflow: visible;
-      border: 2px solid rgba(255, 255, 255, 0.22);
-    `;
-
-    // 🔥 МОНЕТА МАКСИМАЛЬНО СЛЕВА - ЭКСТРЕМАЛЬНОЕ СМЕЩЕНИЕ
+    container.id = 'coin-counter-container';
+    document.body.appendChild(container);
+    
+    // Монета
     const coinIcon = document.createElement('img');
     coinIcon.src = '/textures/coin.png';
     coinIcon.alt = 'coin';
-    coinIcon.style.cssText = `
-      width: 70px;
-      height: 70px;
-      object-fit: contain;
-      filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55));
-      margin-left: -80px;
-      margin-right: -20px;
-      margin-top: -22px;
-      margin-bottom: -22px;
-      z-index: 101;
-      transform: scale(1.05);
-      position: relative;
-      left: -20px;
-    `;
+    coinIcon.id = 'coin-icon';
     
     // Резервный вариант при ошибке загрузки
     coinIcon.onerror = () => {
       console.warn('⚠️ Не удалось загрузить coin.png, используем эмодзи');
       const fallbackSpan = document.createElement('span');
       fallbackSpan.innerHTML = '🪙';
+      fallbackSpan.id = 'coin-icon-fallback';
       fallbackSpan.style.cssText = `
-        font-size: 60px;
-        filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55));
-        margin-left: -80px;
-        margin-right: -20px;
-        margin-top: -22px;
-        margin-bottom: -22px;
-        z-index: 101;
-        transform: scale(1.05);
-        position: relative;
-        left: -20px;
+        font-size: inherit;
+        line-height: 1;
+        display: inline-block;
       `;
       coinIcon.replaceWith(fallbackSpan);
       this.coinIconElement = fallbackSpan;
@@ -171,26 +138,321 @@ export class Game {
 
     const countText = document.createElement('span');
     countText.id = 'coinCount';
-    countText.style.cssText = `
-      color: #ffd700;
-      font-size: 28px;
-      font-weight: bold;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-      min-width: 75px;
-      text-align: center;
-      letter-spacing: 1.5px;
-      line-height: 1;
-      margin-right: 5px;
-    `;
     countText.textContent = `x${this.score}`;
 
     container.appendChild(coinIcon);
     container.appendChild(countText);
-    document.body.appendChild(container);
     
     this.coinContainer = container;
     this.coinCounterElement = countText;
     this.coinIconElement = coinIcon;
+    
+    // Применяем адаптивные стили
+    this.updateCoinCounterStyles();
+  }
+
+  // 🔥 ИСПРАВЛЕННЫЙ МЕТОД ДЛЯ ОБНОВЛЕНИЯ АДАПТИВНЫХ СТИЛЕЙ (2560px УВЕЛИЧЕН)
+  private updateCoinCounterStyles(): void {
+    if (!this.coinContainer) return;
+    
+    const width = window.innerWidth;
+    
+    // Базовые стили для контейнера
+    let containerStyles = `
+      position: fixed;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
+      box-shadow: 0 4px 14px rgba(255, 107, 107, 0.5);
+      z-index: 100;
+      font-family: 'Arial', sans-serif;
+      pointer-events: none;
+      overflow: visible;
+      border: 2px solid rgba(255, 255, 255, 0.22);
+      transition: all 0.3s ease;
+    `;
+    
+    // Стили для иконки
+    let iconStyles = `
+      object-fit: contain;
+      filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55));
+      z-index: 101;
+      position: relative;
+      transition: all 0.3s ease;
+    `;
+    
+    // Стили для текста
+    let textStyles = `
+      color: #ffd700;
+      font-weight: bold;
+      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+      text-align: center;
+      letter-spacing: 1.5px;
+      line-height: 1;
+      transition: all 0.3s ease;
+    `;
+    
+    // 📱 ИСПРАВЛЕННАЯ ПРОГРЕССИВНАЯ ШКАЛА (2560px УВЕЛИЧЕН)
+    if (width >= 1920) {
+      // Очень большие экраны (1920px+) - УВЕЛИЧЕННЫЙ РАЗМЕР
+      containerStyles += `
+        top: 45px;
+        padding: 6px 28px 6px 0;
+        height: 44px;
+        min-width: 160px;
+        border-radius: 24px;
+      `;
+      iconStyles += `
+        width: 76px;
+        height: 76px;
+        margin-left: -86px;
+        margin-right: -22px;
+        margin-top: -24px;
+        margin-bottom: -24px;
+        left: -28px;
+        transform: scale(1.06);
+      `;
+      textStyles += `
+        font-size: 30px;
+        min-width: 80px;
+        margin-right: 6px;
+      `;
+    }
+    else if (width >= 1440) {
+      // Большие десктопы (1440-1919px) - размер как был для 1024
+      containerStyles += `
+        top: 25px;
+        padding: 3px 18px 3px 0;
+        height: 30px;
+        min-width: 110px;
+        border-radius: 16px;
+      `;
+      iconStyles += `
+        width: 52px;
+        height: 52px;
+        margin-left: -62px;
+        margin-right: -14px;
+        margin-top: -16px;
+        margin-bottom: -16px;
+        left: -19px;
+        transform: scale(1.02);
+      `;
+      textStyles += `
+        font-size: 20px;
+        min-width: 55px;
+        margin-right: 3px;
+      `;
+    } 
+    else if (width >= 1024) {
+      // Десктопы (1024-1439px) - размер как был для 768
+      containerStyles += `
+        top: 20px;
+        padding: 3px 16px 3px 0;
+        height: 28px;
+        min-width: 100px;
+        border-radius: 15px;
+      `;
+      iconStyles += `
+        width: 48px;
+        height: 48px;
+        margin-left: -56px;
+        margin-right: -12px;
+        margin-top: -14px;
+        margin-bottom: -14px;
+        left: -17px;
+        transform: scale(1.02);
+      `;
+      textStyles += `
+        font-size: 18px;
+        min-width: 50px;
+        margin-right: 3px;
+      `;
+    } 
+    else if (width >= 768) {
+      // Планшеты (768-1023px) - размер как был для 576
+      containerStyles += `
+        top: 18px;
+        padding: 2px 14px 2px 0;
+        height: 26px;
+        min-width: 90px;
+        border-radius: 14px;
+      `;
+      iconStyles += `
+        width: 44px;
+        height: 44px;
+        margin-left: -50px;
+        margin-right: -10px;
+        margin-top: -12px;
+        margin-bottom: -12px;
+        left: -15px;
+        transform: scale(1.01);
+      `;
+      textStyles += `
+        font-size: 16px;
+        min-width: 45px;
+        margin-right: 2px;
+      `;
+    } 
+    else if (width >= 576) {
+      // Мобильные большие (576-767px) - размер как был для 425
+      containerStyles += `
+        top: 16px;
+        padding: 2px 12px 2px 0;
+        height: 24px;
+        min-width: 80px;
+        border-radius: 12px;
+      `;
+      iconStyles += `
+        width: 40px;
+        height: 40px;
+        margin-left: -46px;
+        margin-right: -8px;
+        margin-top: -10px;
+        margin-bottom: -10px;
+        left: -13px;
+        transform: scale(1);
+      `;
+      textStyles += `
+        font-size: 15px;
+        min-width: 40px;
+        margin-right: 2px;
+      `;
+    } 
+    else if (width >= 425) {
+      // Мобильные средние (425-575px) - размер как был для 375
+      containerStyles += `
+        top: 14px;
+        padding: 2px 10px 2px 0;
+        height: 22px;
+        min-width: 70px;
+        border-radius: 11px;
+      `;
+      iconStyles += `
+        width: 36px;
+        height: 36px;
+        margin-left: -42px;
+        margin-right: -6px;
+        margin-top: -9px;
+        margin-bottom: -9px;
+        left: -11px;
+        transform: scale(0.99);
+      `;
+      textStyles += `
+        font-size: 14px;
+        min-width: 35px;
+        margin-right: 2px;
+      `;
+    }
+    else {
+      // Маленькие мобильные (до 424px) - еще меньше
+      containerStyles += `
+        top: 12px;
+        padding: 2px 8px 2px 0;
+        height: 20px;
+        min-width: 60px;
+        border-radius: 10px;
+      `;
+      iconStyles += `
+        width: 32px;
+        height: 32px;
+        margin-left: -38px;
+        margin-right: -4px;
+        margin-top: -8px;
+        margin-bottom: -8px;
+        left: -9px;
+        transform: scale(0.98);
+      `;
+      textStyles += `
+        font-size: 13px;
+        min-width: 30px;
+        margin-right: 2px;
+      `;
+    }
+    
+    // Применяем стили к контейнеру
+    this.coinContainer.style.cssText = containerStyles;
+    
+    // Применяем стили к иконке (если это изображение)
+    const icon = this.coinIconElement;
+    if (icon && icon.tagName === 'IMG') {
+      (icon as HTMLImageElement).style.cssText = iconStyles;
+    } else if (icon && icon.id === 'coin-icon-fallback') {
+      // Для эмодзи-заглушки - прогрессивная шкала с исправленными размерами
+      let emojiSize, emojiMarginLeft, emojiMarginRight, emojiMarginTop, emojiMarginBottom, emojiLeft;
+      
+      if (width >= 1920) {
+        emojiSize = '76px';
+        emojiMarginLeft = '-86px';
+        emojiMarginRight = '-22px';
+        emojiMarginTop = '-24px';
+        emojiMarginBottom = '-24px';
+        emojiLeft = '-28px';
+      } else if (width >= 1440) {
+        emojiSize = '52px';
+        emojiMarginLeft = '-62px';
+        emojiMarginRight = '-14px';
+        emojiMarginTop = '-16px';
+        emojiMarginBottom = '-16px';
+        emojiLeft = '-19px';
+      } else if (width >= 1024) {
+        emojiSize = '48px';
+        emojiMarginLeft = '-56px';
+        emojiMarginRight = '-12px';
+        emojiMarginTop = '-14px';
+        emojiMarginBottom = '-14px';
+        emojiLeft = '-17px';
+      } else if (width >= 768) {
+        emojiSize = '44px';
+        emojiMarginLeft = '-50px';
+        emojiMarginRight = '-10px';
+        emojiMarginTop = '-12px';
+        emojiMarginBottom = '-12px';
+        emojiLeft = '-15px';
+      } else if (width >= 576) {
+        emojiSize = '40px';
+        emojiMarginLeft = '-46px';
+        emojiMarginRight = '-8px';
+        emojiMarginTop = '-10px';
+        emojiMarginBottom = '-10px';
+        emojiLeft = '-13px';
+      } else if (width >= 425) {
+        emojiSize = '36px';
+        emojiMarginLeft = '-42px';
+        emojiMarginRight = '-6px';
+        emojiMarginTop = '-9px';
+        emojiMarginBottom = '-9px';
+        emojiLeft = '-11px';
+      } else {
+        emojiSize = '32px';
+        emojiMarginLeft = '-38px';
+        emojiMarginRight = '-4px';
+        emojiMarginTop = '-8px';
+        emojiMarginBottom = '-8px';
+        emojiLeft = '-9px';
+      }
+      
+      icon.style.cssText = `
+        font-size: ${emojiSize};
+        filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55));
+        margin-left: ${emojiMarginLeft};
+        margin-right: ${emojiMarginRight};
+        margin-top: ${emojiMarginTop};
+        margin-bottom: ${emojiMarginBottom};
+        z-index: 101;
+        position: relative;
+        left: ${emojiLeft};
+        transition: all 0.3s ease;
+        line-height: 1;
+        display: inline-block;
+      `;
+    }
+    
+    if (this.coinCounterElement) {
+      this.coinCounterElement.style.cssText = textStyles;
+    }
   }
 
   // 🔥 УБРАЛ ВСЕ АНИМАЦИИ И ТАЙМАУТЫ!
@@ -977,5 +1239,7 @@ export class Game {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    // Обновляем стили счетчика при изменении размера окна
+    this.updateCoinCounterStyles();
   }
 }
