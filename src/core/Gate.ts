@@ -151,11 +151,12 @@ export class Gate {
     wall.receiveShadow = false
     this.mesh.add(wall)
 
-    this.addTextToSectionWall(wall, centerX, wallWidth, modifier, section)
+    // Убираем неиспользуемый параметр wall
+    this.addTextToSectionWall(centerX, wallWidth, modifier, section)
   }
 
   private addTextToSectionWall(
-    wall: THREE.Mesh,
+    // Убираем параметр wall, так как он не используется
     centerX: number,
     wallWidth: number,
     modifier: GateModifier,

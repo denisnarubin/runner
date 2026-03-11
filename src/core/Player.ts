@@ -15,8 +15,7 @@ export type PlayerState = 'idle' | 'running' | 'falling' | 'dancing' | 'breakdan
 
 export class Player {
   private mesh: THREE.Group
-  private model: THREE.Object3D | null = null
-  private targetX = 0
+  // 🔥 Убираем неиспользуемое поле model, оставляем только там где нужно
   private currentLane = 0
   private readonly LANE_WIDTH = 1.8
   private readonly FORWARD_SPEED = 0.15
@@ -107,9 +106,10 @@ export class Player {
         console.log('✅ Базовая модель загружена')
         console.log(`📦 Дочерних объектов: ${object.children.length}`)
         
-        this.model = object
+        // 🔥 Сохраняем модель в локальную переменную, не в поле класса
+        const model = object
         
-        object.traverse((child) => {
+        model.traverse((child) => {
           if (child instanceof THREE.Mesh && child.name) {
             this.characterMeshes.set(child.name, child)
             console.log(`  └─ Меш: ${child.name}`)
@@ -117,13 +117,13 @@ export class Player {
         })
         
         if (this.atlasTexture) {
-          this.applyTextureToModel(object)
+          this.applyTextureToModel(model)
         }
         
-        this.mesh.add(object)
+        this.mesh.add(model)
         this.mesh.position.set(0, 0.75, 0)
         
-        const box = new THREE.Box3().setFromObject(object)
+        const box = new THREE.Box3().setFromObject(model)
         const size = new THREE.Vector3()
         box.getSize(size)
         if (size.y > 0.1) {
@@ -132,7 +132,7 @@ export class Player {
           console.log(`⚖️ Масштаб: ${scale.toFixed(2)} (увеличен)`)
         }
         
-        this.mixer = new THREE.AnimationMixer(object)
+        this.mixer = new THREE.AnimationMixer(model)
         onReady()
       },
       undefined,
@@ -348,8 +348,7 @@ export class Player {
     this.currentState = 'falling'
     this.isMoving = false
     
-    this.targetX = this.currentLane * this.LANE_WIDTH
-    
+    // 🔥 Используем currentLane напрямую, без targetX
     const fallAction = this.actions.get('fall')
     if (fallAction) {
       fallAction.time = 0
@@ -453,14 +452,12 @@ export class Player {
   moveLeft(): void {
     if (this.currentLane > -1) {
       this.currentLane--
-      this.targetX = this.currentLane * this.LANE_WIDTH
     }
   }
   
   moveRight(): void {
     if (this.currentLane < 1) {
       this.currentLane++
-      this.targetX = this.currentLane * this.LANE_WIDTH
     }
   }
   

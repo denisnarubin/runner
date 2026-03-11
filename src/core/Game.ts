@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { World } from './World';
 import { Player } from './Player';
 import { Gate } from './Gate';
-import type { GateModifier } from './Gate';
+
 
 export class Game {
   private scene: THREE.Scene;

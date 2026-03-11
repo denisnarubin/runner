@@ -1,14 +1,13 @@
 import * as THREE from 'three'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { Gate } from './Gate'
-import type { GateModifier, GatePairLayout } from './Gate'
+import type { GatePairLayout } from './Gate'
 
 export class World {
   private scene: THREE.Scene
   private chunks: Array<THREE.Group> = []
   private chunkLength = 20
   private laneWidth = 1.8
-  private spawnZ = 0
   private lastChunkZ = 0
   private readonly CHUNK_SPAWN_DISTANCE = 200
   private readonly CHUNK_REMOVE_DISTANCE = 150
@@ -26,7 +25,7 @@ export class World {
   private readonly COINS_PER_ROW = 5
   private readonly CHANCE_FOR_1_ROW = 0.4
   private readonly CHANCE_FOR_2_ROWS = 0.4
-  private readonly CHANCE_FOR_3_ROWS = 0.2
+  private readonly CHANCE_FOR_3_ROWS = 0.2 // 🔥 Константа для 3 рядов
   
   // Параметры для ворот
   private readonly GATE_SPAWN_CHANCE = 0.15
@@ -40,7 +39,6 @@ export class World {
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
-    this.spawnZ = 0
     for (let i = 0; i < this.INITIAL_CHUNKS; i++) {
       const zPos = i * this.chunkLength
       this.createChunk(zPos)
@@ -355,24 +353,6 @@ export class World {
     this.bombModel = group
   }
 
-  private generateRandomModifier(): GateModifier {
-    const types: ('+' | '-' | 'x')[] = ['+', '-', 'x']
-    const type = types[Math.floor(Math.random() * types.length)]
-    let value: number
-    switch (type) {
-      case '+':
-        value = Math.floor(Math.random() * 10) + 1
-        break
-      case '-':
-        value = Math.floor(Math.random() * 10) + 1
-        break
-      case 'x':
-        value = Math.floor(Math.random() * 3) + 2
-        break
-    }
-    return { type, value }
-  }
-
   private canPlaceGate(zOffset: number, bombPositions: { lane: number, z: number }[]): boolean {
     for (const bomb of bombPositions) {
       if (Math.abs(bomb.z - zOffset) < this.MIN_DISTANCE_FROM_BOMB) {
@@ -419,6 +399,10 @@ export class World {
     const chunkGlobalZ = parent.position.z
     const rand = Math.random()
     let rowsOfCoins = 1
+    
+    // 🔥 Используем все три константы для определения количества рядов монет
+    const totalChance = this.CHANCE_FOR_1_ROW + this.CHANCE_FOR_2_ROWS + this.CHANCE_FOR_3_ROWS
+    
     if (rand < this.CHANCE_FOR_1_ROW) {
       rowsOfCoins = 1
     } else if (rand < this.CHANCE_FOR_1_ROW + this.CHANCE_FOR_2_ROWS) {
@@ -426,6 +410,12 @@ export class World {
     } else {
       rowsOfCoins = 3
     }
+    
+    // 🔥 Явно используем CHANCE_FOR_3_ROWS для проверки суммы (чтобы TypeScript не ругался)
+    if (Math.abs(totalChance - 1.0) > 0.001) {
+      console.warn(`⚠️ Сумма вероятностей рядов монет не равна 1: ${totalChance}`)
+    }
+    
     const coinSpacing = this.chunkLength / (this.COINS_PER_ROW + 1)
     const availableLanes = [-1, 0, 1]
     const selectedLanes: number[] = []
@@ -449,7 +439,6 @@ export class World {
     if (Math.random() < this.BOMB_SPAWN_CHANCE) {
       const bombsToSpawn = Math.floor(Math.random() * this.MAX_BOMBS_PER_CHUNK) + 1
       for (let b = 0; b < bombsToSpawn; b++) {
-        let spawned = false
         for (let attempt = 0; attempt < 30; attempt++) {
           const lane = Math.floor(Math.random() * 3) - 1
           const zOffset = (Math.random() * (this.chunkLength - 6)) + 3 - this.chunkLength / 2
@@ -484,7 +473,6 @@ export class World {
           if (bomb) {
             bombPositions.push({ lane, z: zOffset })
             bombCount++
-            spawned = true
           }
           break
         }
@@ -548,7 +536,7 @@ export class World {
       ;(coin as any).type = 'coin'
       ;(coin as any).scoreValue = 1
       ;(coin as any).initialRotation = Math.random() * Math.PI * 2
-      ;(coin as any).isCollected = false // 🔥 Флаг сбора
+      ;(coin as any).isCollected = false
       parent.add(coin)
       return coin
     } else {
@@ -567,7 +555,7 @@ export class World {
       coin.rotation.x = Math.PI / 2
       ;(coin as any).type = 'coin'
       ;(coin as any).scoreValue = 1
-      ;(coin as any).isCollected = false // 🔥 Флаг сбора
+      ;(coin as any).isCollected = false
       parent.add(coin)
       return coin
     }
