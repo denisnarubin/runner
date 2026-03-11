@@ -32,6 +32,15 @@ export class Game {
   
   // 🔥 КЭШ ЗВУКОВ для предотвращения фризов
   private soundCache: Map<string, HTMLAudioElement> = new Map();
+  
+  // 🔥 Для звуков шагов
+  private stepIndex = 0;
+  private stepTimer = 0;
+  private readonly STEP_INTERVAL = 0.4; // Интервал между шагами (секунды)
+  
+  // 🔥 Для фоновой музыки
+  private backgroundMusic: HTMLAudioElement | null = null;
+  private musicStarted = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -90,22 +99,121 @@ export class Game {
     // Добавляем слушатель изменения размера окна для адаптации счетчика
     window.addEventListener('resize', () => this.updateCoinCounterStyles());
     
-    // 🔥 Предзагрузка звуков
+    // 🔥 Предзагрузка звуков (включая музыку)
     this.preloadSounds();
   }
 
-  // 🔥 ПРЕДЗАГРУЗКА ЗВУКОВ
+  // 🔥 ПРЕДЗАГРУЗКА ЗВУКОВ (включая шаги, бомбу, ворота и музыку)
   private preloadSounds(): void {
-    const sounds = ['coin', 'bomb', 'gate'];
+    // Добавляем все звуки: монета, бомба, ворота, шаги
+    const sounds = ['coin', 'bomb', 'gate', 'step_0', 'step_1', 'step_2'];
     sounds.forEach(name => {
       try {
-        const audio = new Audio(`/sounds/${name}.mp3`);
-        audio.volume = 0.5;
-        this.soundCache.set(name, audio);
+        // Пробуем загрузить .mp3
+        let audio = new Audio(`/sounds/${name}.mp3`);
+        
+        // Если .mp3 не загружается, пробуем .wav (особенно для gate)
+        audio.onerror = () => {
+          try {
+            const wavAudio = new Audio(`/sounds/${name}.wav`);
+            this.setupAudio(wavAudio, name);
+          } catch (e) {
+            console.warn(`⚠️ Не удалось загрузить звук "${name}" ни в .mp3, ни в .wav`);
+          }
+        };
+        
+        this.setupAudio(audio, name);
       } catch (e) {
-        console.warn(`⚠️ Не удалось предзагрузить звук "${name}"`);
+        // Если .mp3 не существует, пробуем .wav
+        try {
+          const wavAudio = new Audio(`/sounds/${name}.wav`);
+          this.setupAudio(wavAudio, name);
+        } catch (err) {
+          console.warn(`⚠️ Не удалось предзагрузить звук "${name}"`);
+        }
       }
     });
+    
+    // 🔥 Загружаем фоновую музыку отдельно (WAV файл с длинным названием)
+    try {
+      // Пробуем загрузить с оригинальным именем
+      let musicPath = '/sounds/music_halloween party [loop].wav';
+      
+      // Создаем элемент аудио для музыки
+      const music = new Audio(musicPath);
+      music.loop = true; // Зацикливаем
+      music.volume = 0.3; // Тише, чем звуки эффектов
+      
+      // Добавляем обработчик ошибки на случай если файл не найден
+      music.onerror = () => {
+        console.warn('⚠️ Не удалось загрузить музыку с оригинальным именем, пробуем music.mp3');
+        // Пробуем загрузить как music.mp3
+        const fallbackMusic = new Audio('/sounds/music.mp3');
+        fallbackMusic.loop = true;
+        fallbackMusic.volume = 0.3;
+        this.backgroundMusic = fallbackMusic;
+        console.log('✅ Музыка предзагружена (fallback): music.mp3');
+      };
+      
+      music.oncanplaythrough = () => {
+        console.log('✅ Музыка успешно загружена и готова к воспроизведению');
+      };
+      
+      this.backgroundMusic = music;
+      console.log('✅ Музыка предзагружена:', musicPath);
+    } catch (e) {
+      console.warn('⚠️ Не удалось предзагрузить музыку:', e);
+    }
+  }
+
+  // 🔥 Вспомогательный метод для настройки аудио
+  private setupAudio(audio: HTMLAudioElement, name: string): void {
+    // Устанавливаем разную громкость для разных типов звуков
+    if (name.startsWith('step')) {
+      audio.volume = 0.25; // Шаги тише
+    } else if (name === 'bomb') {
+      audio.volume = 0.6; // Взрыв чуть громче
+    } else if (name === 'gate') {
+      audio.volume = 0.5; // Звук ворот
+    } else {
+      audio.volume = 0.5; // Остальные звуки
+    }
+    this.soundCache.set(name, audio);
+    console.log(`✅ Звук предзагружен: ${name}`);
+  }
+
+  // 🔥 Воспроизведение фоновой музыки
+  private playBackgroundMusic(): void {
+    if (this.backgroundMusic && !this.musicStarted) {
+      this.backgroundMusic.play()
+        .then(() => {
+          this.musicStarted = true;
+          console.log('🎵 Фоновая музыка запущена');
+        })
+        .catch((err) => {
+          console.warn('⚠️ Не удалось запустить музыку:', err);
+          // Некоторые браузеры блокируют автовоспроизведение до взаимодействия пользователя
+        });
+    }
+  }
+
+  // 🔥 Остановка фоновой музыки
+  private stopBackgroundMusic(): void {
+    if (this.backgroundMusic && this.musicStarted) {
+      this.backgroundMusic.pause();
+      this.backgroundMusic.currentTime = 0;
+      this.musicStarted = false;
+      console.log('🎵 Фоновая музыка остановлена');
+    }
+  }
+
+  // 🔥 Воспроизведение звука шага
+  private playStepSound(): void {
+    if (!this.player || this.isGameOver || this.isFinished) return;
+    
+    const stepName = `step_${this.stepIndex}`;
+    this.playSound(stepName);
+    this.stepIndex = (this.stepIndex + 1) % 3; // Циклически 0,1,2,0,1,2...
   }
 
   // 🔥 АДАПТИВНЫЙ СЧЕТЧИК с исправленными брейкпоинтами
@@ -151,7 +259,7 @@ export class Game {
     this.updateCoinCounterStyles();
   }
 
-  // 🔥 ИСПРАВЛЕННЫЙ МЕТОД ДЛЯ ОБНОВЛЕНИЯ АДАПТИВНЫХ СТИЛЕЙ (2560px УВЕЛИЧЕН)
+  // 🔥 ИСПРАВЛЕННЫЙ МЕТОД ДЛЯ ОБНОВЛЕНИЯ АДАПТИВНЫХ СТИЛЕЙ
   private updateCoinCounterStyles(): void {
     if (!this.coinContainer) return;
     
@@ -195,9 +303,8 @@ export class Game {
       transition: all 0.3s ease;
     `;
     
-    // 📱 ИСПРАВЛЕННАЯ ПРОГРЕССИВНАЯ ШКАЛА (2560px УВЕЛИЧЕН)
+    // Прогрессивная шкала
     if (width >= 1920) {
-      // Очень большие экраны (1920px+) - УВЕЛИЧЕННЫЙ РАЗМЕР
       containerStyles += `
         top: 45px;
         padding: 6px 28px 6px 0;
@@ -222,7 +329,6 @@ export class Game {
       `;
     }
     else if (width >= 1440) {
-      // Большие десктопы (1440-1919px) - размер как был для 1024
       containerStyles += `
         top: 25px;
         padding: 3px 18px 3px 0;
@@ -247,7 +353,6 @@ export class Game {
       `;
     } 
     else if (width >= 1024) {
-      // Десктопы (1024-1439px) - размер как был для 768
       containerStyles += `
         top: 20px;
         padding: 3px 16px 3px 0;
@@ -272,7 +377,6 @@ export class Game {
       `;
     } 
     else if (width >= 768) {
-      // Планшеты (768-1023px) - размер как был для 576
       containerStyles += `
         top: 18px;
         padding: 2px 14px 2px 0;
@@ -297,7 +401,6 @@ export class Game {
       `;
     } 
     else if (width >= 576) {
-      // Мобильные большие (576-767px) - размер как был для 425
       containerStyles += `
         top: 16px;
         padding: 2px 12px 2px 0;
@@ -322,7 +425,6 @@ export class Game {
       `;
     } 
     else if (width >= 425) {
-      // Мобильные средние (425-575px) - размер как был для 375
       containerStyles += `
         top: 14px;
         padding: 2px 10px 2px 0;
@@ -347,7 +449,6 @@ export class Game {
       `;
     }
     else {
-      // Маленькие мобильные (до 424px) - еще меньше
       containerStyles += `
         top: 12px;
         padding: 2px 8px 2px 0;
@@ -375,12 +476,11 @@ export class Game {
     // Применяем стили к контейнеру
     this.coinContainer.style.cssText = containerStyles;
     
-    // Применяем стили к иконке (если это изображение)
+    // Применяем стили к иконке
     const icon = this.coinIconElement;
     if (icon && icon.tagName === 'IMG') {
       (icon as HTMLImageElement).style.cssText = iconStyles;
     } else if (icon && icon.id === 'coin-icon-fallback') {
-      // Для эмодзи-заглушки - прогрессивная шкала с исправленными размерами
       let emojiSize, emojiMarginLeft, emojiMarginRight, emojiMarginTop, emojiMarginBottom, emojiLeft;
       
       if (width >= 1920) {
@@ -455,7 +555,6 @@ export class Game {
     }
   }
 
-  // 🔥 УБРАЛ ВСЕ АНИМАЦИИ И ТАЙМАУТЫ!
   private updateCoinCounter(): void {
     if (this.coinCounterElement) {
       this.coinCounterElement.textContent = `x${this.score}`;
@@ -947,6 +1046,8 @@ export class Game {
         this.isTutorialVisible = false;
         overlay.remove();
         this.player?.startRunning();
+        // 🔥 Запускаем музыку после закрытия туториала
+        this.playBackgroundMusic();
       }
     };
     
@@ -995,6 +1096,15 @@ export class Game {
     
     if (this.player) {
       this.player.update(delta);
+      
+      // Звуки шагов
+      if (this.player.isMovingForward() && !this.isGameOver && !this.isFinished) {
+        this.stepTimer += delta;
+        if (this.stepTimer >= this.STEP_INTERVAL) {
+          this.stepTimer = 0;
+          this.playStepSound();
+        }
+      }
       
       if (this.world && !this.isFinished) {
         this.world.update(this.player.getPosition().z);
@@ -1057,7 +1167,6 @@ export class Game {
     }
   }
 
-  // 🔥 УБРАЛ ВСЕ ЛОГИ И ТЯЖЁЛЫЕ ОПЕРАЦИИ
   private checkCollisions(): void {
     if (!this.player || !this.world || this.isGameOver || this.isFinished) return;
     
@@ -1091,21 +1200,17 @@ export class Game {
     }
   }
 
-  // 🔥 ОПТИМИЗИРОВАННАЯ ОБРАБОТКА КОЛЛИЗИЙ (без фризов!)
   private handleCollision(obj: THREE.Object3D, objPos: THREE.Vector3): void {
     const type = (obj as any).type as string;
     
     switch (type) {
       case 'coin':
-        // 🔥 ПРОВЕРКА: уже собрана?
         if ((obj as any).isCollected) {
           return;
         }
         
         this.score += 1;
-        // 🔥 СКРЫВАЕМ вместо удаления
         obj.visible = false;
-        // 🔥 Помечаем как собранную
         (obj as any).isCollected = true;
         
         this.updateCoinCounter();
@@ -1114,14 +1219,14 @@ export class Game {
         
       case 'bomb':
         this.createExplosion(objPos);
+        this.playSound('bomb');
         if (this.player) {
           this.player.playFall(() => {
             this.endGame(false);
+            this.stopBackgroundMusic(); // 🔥 Останавливаем музыку при проигрыше
           });
         }
-        // Бомбы удаляем (они больше не нужны)
         this.world?.removeObject(obj);
-        this.playSound('bomb');
         break;
         
       case 'gate':
@@ -1148,6 +1253,7 @@ export class Game {
           }
           
           this.updateCoinCounter();
+          // 🔥 Воспроизводим звук ворот (SFX_UI_Appear_Generic_2.wav)
           this.playSound('gate');
           gate.markAsPassed();
         }
@@ -1155,19 +1261,41 @@ export class Game {
     }
   }
 
-  // 🔥 ОПТИМИЗИРОВАННОЕ ВОСПРОИЗВЕДЕНИЕ ЗВУКА
   private playSound(name: string): void {
     try {
       const cachedAudio = this.soundCache.get(name);
       if (cachedAudio) {
-        // 🔥 Создаём клон предзагруженного звука
         const clone = cachedAudio.cloneNode() as HTMLAudioElement;
-        clone.volume = 0.5;
+        // Устанавливаем громкость в зависимости от типа звука
+        if (name.startsWith('step')) {
+          clone.volume = 0.25;
+        } else if (name === 'bomb') {
+          clone.volume = 0.6;
+        } else if (name === 'gate') {
+          clone.volume = 0.5; // Звук ворот
+        } else {
+          clone.volume = 0.5;
+        }
         clone.play().catch(() => {});
       } else {
-        // Резервный вариант
+        // Пробуем загрузить .mp3 или .wav
         const audio = new Audio(`/sounds/${name}.mp3`);
-        audio.volume = 0.5;
+        audio.onerror = () => {
+          // Если .mp3 не загрузился, пробуем .wav
+          const wavAudio = new Audio(`/sounds/${name}.wav`);
+          wavAudio.volume = name.startsWith('step') ? 0.25 : (name === 'bomb' ? 0.6 : 0.5);
+          wavAudio.play().catch(() => {});
+        };
+        
+        if (name.startsWith('step')) {
+          audio.volume = 0.25;
+        } else if (name === 'bomb') {
+          audio.volume = 0.6;
+        } else if (name === 'gate') {
+          audio.volume = 0.5;
+        } else {
+          audio.volume = 0.5;
+        }
         audio.play().catch(() => {});
       }
     } catch {}
@@ -1175,6 +1303,7 @@ export class Game {
 
   private endGame(success: boolean): void {
     this.isGameOver = true;
+    this.stopBackgroundMusic(); // 🔥 Останавливаем музыку в любом случае
     if (success && this.player) {
       this.player.faceCamera();
     }
@@ -1239,7 +1368,6 @@ export class Game {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    // Обновляем стили счетчика при изменении размера окна
     this.updateCoinCounterStyles();
   }
 }
