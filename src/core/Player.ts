@@ -73,7 +73,7 @@ export class Player {
     loader.crossOrigin = 'anonymous'
     
     loader.load(
-      '/textures/Polygon_City_Characters_Texture_01_A.png',
+      './textures/Polygon_City_Characters_Texture_01_A.png',
       (texture) => {
         texture.colorSpace = THREE.SRGBColorSpace
         texture.wrapS = THREE.ClampToEdgeWrapping
@@ -101,7 +101,7 @@ export class Player {
     loader.crossOrigin = 'anonymous'
     
     loader.load(
-      '/models/Character.fbx',
+      './models/Character.fbx',
       (object: THREE.Object3D) => {
         console.log('✅ Базовая модель загружена')
         console.log(`📦 Дочерних объектов: ${object.children.length}`)
@@ -193,9 +193,9 @@ export class Player {
     
     // 🔥 Добавляем Breakdance.fbx
     const animationsToLoad = [
-      { path: '/models/Running.fbx', name: 'run' },
-      { path: '/models/Game_over.fbx', name: 'fall' },
-      { path: '/models/Breakdance.fbx', name: 'breakdance' }
+      { path: './models/Running.fbx', name: 'run' },
+      { path: './models/Game_over.fbx', name: 'fall' },
+      { path: './models/Breakdance.fbx', name: 'breakdance' }
     ]
     
     let loaded = 0

@@ -109,16 +109,16 @@ export class World {
   private loadCoinModel(onReady: () => void): void {
     const loader = new FBXLoader()
     loader.crossOrigin = 'anonymous'
-    console.log('⏳ Загрузка модели монеты: /models/Coin_Reskin.fbx')
+    console.log('⏳ Загрузка модели монеты: ./models/Coin_Reskin.fbx')
     loader.load(
-      '/models/Coin_Reskin.fbx',
+      './models/Coin_Reskin.fbx',
       (object: THREE.Object3D) => {
         console.log('✅ Модель монеты загружена!')
         object.scale.set(0.8, 0.8, 0.8)
         const textureLoader = new THREE.TextureLoader()
         textureLoader.crossOrigin = 'anonymous'
         textureLoader.load(
-          '/textures/coin.png',
+          './textures/coin.png',
           (texture) => {
             console.log('✅ Текстура монеты загружена!')
             texture.colorSpace = THREE.SRGBColorSpace
@@ -179,7 +179,7 @@ export class World {
     const loader = new FBXLoader()
     loader.crossOrigin = 'anonymous'
     loader.load(
-      '/models/tnt_barrel_large.fbx',
+      './models/tnt_barrel_large.fbx',
       (object: THREE.Object3D) => {
         console.log('✅ Модель бомбы загружена!')
         const box = new THREE.Box3().setFromObject(object)
@@ -190,9 +190,9 @@ export class World {
         const textureLoader = new THREE.TextureLoader()
         textureLoader.crossOrigin = 'anonymous'
         const texturePaths = {
-          albedo: '/textures/explosives_texture.png',
-          roughness: '/textures/explosives_rough.png',
-          glow: '/textures/explosives_glow.png'
+          albedo: './textures/explosives_texture.png',
+          roughness: './textures/explosives_rough.png',
+          glow: './textures/explosives_glow.png'
         }
         textureLoader.load(
           texturePaths.albedo,

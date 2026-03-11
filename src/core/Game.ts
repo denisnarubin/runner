@@ -110,12 +110,12 @@ export class Game {
     sounds.forEach(name => {
       try {
         // Пробуем загрузить .mp3
-        let audio = new Audio(`/sounds/${name}.mp3`);
+        let audio = new Audio(`./sounds/${name}.mp3`);
         
         // Если .mp3 не загружается, пробуем .wav
         audio.onerror = () => {
           try {
-            const wavAudio = new Audio(`/sounds/${name}.wav`);
+            const wavAudio = new Audio(`./sounds/${name}.wav`);
             this.setupAudio(wavAudio, name);
           } catch (e) {
             console.warn(`⚠️ Не удалось загрузить звук "${name}" ни в .mp3, ни в .wav`);
@@ -126,7 +126,7 @@ export class Game {
       } catch (e) {
         // Если .mp3 не существует, пробуем .wav
         try {
-          const wavAudio = new Audio(`/sounds/${name}.wav`);
+          const wavAudio = new Audio(`./sounds/${name}.wav`);
           this.setupAudio(wavAudio, name);
         } catch (err) {
           console.warn(`⚠️ Не удалось предзагрузить звук "${name}"`);
@@ -137,7 +137,7 @@ export class Game {
     // 🔥 Загружаем фоновую музыку отдельно (WAV файл с длинным названием)
     try {
       // Пробуем загрузить с оригинальным именем
-      let musicPath = '/sounds/music_halloween party [loop].wav';
+      let musicPath = './sounds/music_halloween party [loop].wav';
       
       // Создаем элемент аудио для музыки
       const music = new Audio(musicPath);
@@ -148,7 +148,7 @@ export class Game {
       music.onerror = () => {
         console.warn('⚠️ Не удалось загрузить музыку с оригинальным именем, пробуем music.mp3');
         // Пробуем загрузить как music.mp3
-        const fallbackMusic = new Audio('/sounds/music.mp3');
+        const fallbackMusic = new Audio('./sounds/music.mp3');
         fallbackMusic.loop = true;
         fallbackMusic.volume = 0.3;
         this.backgroundMusic = fallbackMusic;
@@ -229,7 +229,7 @@ export class Game {
     
     // Монета
     const coinIcon = document.createElement('img');
-    coinIcon.src = '/textures/coin.png';
+    coinIcon.src = './textures/coin.png';
     coinIcon.alt = 'coin';
     coinIcon.id = 'coin-icon';
     
@@ -1297,11 +1297,11 @@ export class Game {
       } else {
         console.warn(`⚠️ Звук ${name} не найден в кэше, пробуем загрузить`);
         // Пробуем загрузить .mp3 или .wav
-        const audio = new Audio(`/sounds/${name}.mp3`);
+        const audio = new Audio(`./sounds/${name}.mp3`);
         audio.onerror = () => {
           // Если .mp3 не загрузился, пробуем .wav
           console.log(`🔄 Пробуем загрузить ${name}.wav`);
-          const wavAudio = new Audio(`/sounds/${name}.wav`);
+          const wavAudio = new Audio(`./sounds/${name}.wav`);
           let volume = 0.5;
           if (name.startsWith('step')) volume = 0.25;
           else if (name === 'bomb') volume = 0.6;
