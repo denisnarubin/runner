@@ -99,20 +99,20 @@ export class Game {
     // Добавляем слушатель изменения размера окна для адаптации счетчика
     window.addEventListener('resize', () => this.updateCoinCounterStyles());
     
-    // 🔥 Предзагрузка звуков (включая музыку)
+    // 🔥 Предзагрузка звуков (включая музыку, звук проигрыша и победы)
     this.preloadSounds();
   }
 
-  // 🔥 ПРЕДЗАГРУЗКА ЗВУКОВ (включая шаги, бомбу, ворота и музыку)
+  // 🔥 ПРЕДЗАГРУЗКА ЗВУКОВ (включая шаги, бомбу, ворота, проигрыш, победу и музыку)
   private preloadSounds(): void {
-    // Добавляем все звуки: монета, бомба, ворота, шаги
-    const sounds = ['coin', 'bomb', 'gate', 'step_0', 'step_1', 'step_2'];
+    // Добавляем все звуки: монета, бомба, ворота, шаги, проигрыш, победа
+    const sounds = ['coin', 'bomb', 'gate', 'lose', 'win', 'step_0', 'step_1', 'step_2'];
     sounds.forEach(name => {
       try {
         // Пробуем загрузить .mp3
         let audio = new Audio(`/sounds/${name}.mp3`);
         
-        // Если .mp3 не загружается, пробуем .wav (особенно для gate)
+        // Если .mp3 не загружается, пробуем .wav
         audio.onerror = () => {
           try {
             const wavAudio = new Audio(`/sounds/${name}.wav`);
@@ -174,12 +174,16 @@ export class Game {
     } else if (name === 'bomb') {
       audio.volume = 0.6; // Взрыв чуть громче
     } else if (name === 'gate') {
-      audio.volume = 0.5; // Звук ворот
+      audio.volume = 1.0; // 🔥 МАКСИМАЛЬНАЯ ГРОМКОСТЬ ВОРОТ
+    } else if (name === 'lose') {
+      audio.volume = 0.7; // Звук проигрыша
+    } else if (name === 'win') {
+      audio.volume = 0.8; // 🏆 Звук победы
     } else {
       audio.volume = 0.5; // Остальные звуки
     }
     this.soundCache.set(name, audio);
-    console.log(`✅ Звук предзагружен: ${name}`);
+    console.log(`✅ Звук предзагружен: ${name} (громкость: ${audio.volume})`);
   }
 
   // 🔥 Воспроизведение фоновой музыки
@@ -1155,6 +1159,10 @@ export class Game {
     if (this.player && !this.isGameOver) {
       this.player.faceCamera();
       
+      // 🏆 Воспроизводим звук победы
+      console.log('🏆 Достигнут финиш, играем звук победы');
+      this.playSound('win');
+      
       setTimeout(() => {
         if (this.player && !this.isGameOver) {
           this.player.playBreakdance(() => {
@@ -1222,8 +1230,10 @@ export class Game {
         this.playSound('bomb');
         if (this.player) {
           this.player.playFall(() => {
+            // 🔥 Воспроизводим звук проигрыша перед завершением игры
+            this.playSound('lose');
             this.endGame(false);
-            this.stopBackgroundMusic(); // 🔥 Останавливаем музыку при проигрыше
+            this.stopBackgroundMusic();
           });
         }
         this.world?.removeObject(obj);
@@ -1253,7 +1263,7 @@ export class Game {
           }
           
           this.updateCoinCounter();
-          // 🔥 Воспроизводим звук ворот (SFX_UI_Appear_Generic_2.wav)
+          console.log('🚪 Проход через ворота, играем звук gate');
           this.playSound('gate');
           gate.markAsPassed();
         }
@@ -1272,19 +1282,37 @@ export class Game {
         } else if (name === 'bomb') {
           clone.volume = 0.6;
         } else if (name === 'gate') {
-          clone.volume = 0.5; // Звук ворот
+          clone.volume = 1.0; // 🔥 МАКСИМАЛЬНАЯ ГРОМКОСТЬ ВОРОТ
+        } else if (name === 'lose') {
+          clone.volume = 0.7;
+        } else if (name === 'win') {
+          clone.volume = 0.8; // 🏆 Звук победы
         } else {
           clone.volume = 0.5;
         }
-        clone.play().catch(() => {});
+        console.log(`🔊 Воспроизвожу звук: ${name} (громкость: ${clone.volume})`);
+        clone.play().catch((err) => {
+          console.warn(`⚠️ Ошибка воспроизведения ${name}:`, err);
+        });
       } else {
+        console.warn(`⚠️ Звук ${name} не найден в кэше, пробуем загрузить`);
         // Пробуем загрузить .mp3 или .wav
         const audio = new Audio(`/sounds/${name}.mp3`);
         audio.onerror = () => {
           // Если .mp3 не загрузился, пробуем .wav
+          console.log(`🔄 Пробуем загрузить ${name}.wav`);
           const wavAudio = new Audio(`/sounds/${name}.wav`);
-          wavAudio.volume = name.startsWith('step') ? 0.25 : (name === 'bomb' ? 0.6 : 0.5);
-          wavAudio.play().catch(() => {});
+          let volume = 0.5;
+          if (name.startsWith('step')) volume = 0.25;
+          else if (name === 'bomb') volume = 0.6;
+          else if (name === 'gate') volume = 1.0; // 🔥 МАКСИМАЛЬНАЯ ГРОМКОСТЬ
+          else if (name === 'lose') volume = 0.7;
+          else if (name === 'win') volume = 0.8; // 🏆 Звук победы
+          wavAudio.volume = volume;
+          console.log(`🔊 Воспроизвожу звук: ${name}.wav (громкость: ${volume})`);
+          wavAudio.play().catch((err) => {
+            console.warn(`⚠️ Ошибка воспроизведения ${name}.wav:`, err);
+          });
         };
         
         if (name.startsWith('step')) {
@@ -1292,13 +1320,20 @@ export class Game {
         } else if (name === 'bomb') {
           audio.volume = 0.6;
         } else if (name === 'gate') {
-          audio.volume = 0.5;
+          audio.volume = 1.0; // 🔥 МАКСИМАЛЬНАЯ ГРОМКОСТЬ
+        } else if (name === 'lose') {
+          audio.volume = 0.7;
+        } else if (name === 'win') {
+          audio.volume = 0.8; // 🏆 Звук победы
         } else {
           audio.volume = 0.5;
         }
+        console.log(`🔊 Воспроизвожу звук: ${name}.mp3 (громкость: ${audio.volume})`);
         audio.play().catch(() => {});
       }
-    } catch {}
+    } catch (err) {
+      console.warn(`⚠️ Ошибка в playSound для ${name}:`, err);
+    }
   }
 
   private endGame(success: boolean): void {
