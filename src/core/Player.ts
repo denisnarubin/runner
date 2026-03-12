@@ -300,7 +300,7 @@ export class Player {
       this.playAnimation('fall', 0.1);
       let fallDuration = fallAction.getClip()?.duration || 1.5;
       this.fallTimer = window.setTimeout(() => {
-        this.fallTimer = null; // 🔥 Чтение перед очисткой
+        this.fallTimer = null;
         if (this.onFallComplete) this.onFallComplete();
       }, fallDuration * 1000);
     } else {
@@ -324,7 +324,7 @@ export class Player {
       let danceDuration = danceAction.getClip()?.duration || 3.5;
       const totalWaitTime = (danceDuration * 1000) + 500;
       this.danceTimer = window.setTimeout(() => {
-        this.danceTimer = null; // 🔥 Чтение перед очисткой
+        this.danceTimer = null;
         if (this.onDanceComplete) this.onDanceComplete();
       }, totalWaitTime);
     } else {
@@ -351,12 +351,25 @@ export class Player {
     });
   }
 
+  /**
+   * ИСПРАВЛЕНО: Инвертировано управление для соответствия камере
+   * При нажатии кнопки влево персонаж движется вправо (на экране)
+   * При нажатии кнопки вправо персонаж движется влево (на экране)
+   */
   moveLeft(): void {
-    if (this.currentLane > -1) this.currentLane--;
+    // При нажатии кнопки влево - движемся вправо (увеличиваем X)
+    if (this.currentLane < 1) {
+      this.currentLane++;
+      console.log(`⬅️ Нажата кнопка ВЛЕВО -> персонаж движется ВПРАВО, полоса: ${this.currentLane}, X цель: ${this.currentLane * this.LANE_WIDTH}`);
+    }
   }
 
   moveRight(): void {
-    if (this.currentLane < 1) this.currentLane++;
+    // При нажатии кнопки вправо - движемся влево (уменьшаем X)
+    if (this.currentLane > -1) {
+      this.currentLane--;
+      console.log(`➡️ Нажата кнопка ВПРАВО -> персонаж движется ВЛЕВО, полоса: ${this.currentLane}, X цель: ${this.currentLane * this.LANE_WIDTH}`);
+    }
   }
 
   update(delta: number): void {
@@ -366,7 +379,10 @@ export class Player {
       this.mesh.position.z += this.FORWARD_SPEED * 60 * delta;
     }
     
+    // Рассчитываем целевую X координату
     const targetX = this.currentLane * this.LANE_WIDTH;
+    
+    // Плавно перемещаемся к целевой позиции
     this.mesh.position.x = THREE.MathUtils.lerp(this.mesh.position.x, targetX, this.MOVE_LERP);
   }
 

@@ -7,6 +7,8 @@ import { AssetLoader } from './AssetLoader';
 // 🔥 ЗВУКИ — ленивая загрузка через dynamic import
 // 🔥 ТЕКСТУРЫ — статический импорт (маленький размер)
 import coinTextureUrl from '../assets/textures/coin.png?url';
+import soundOnUrl from '../assets/textures/sound_on_coffee.png?url';
+import soundOffUrl from '../assets/textures/sound_off_coffee.png?url';
 
 export class Game {
   private scene: THREE.Scene;
@@ -38,6 +40,8 @@ export class Game {
   private readonly STEP_INTERVAL = 0.4;
   private backgroundMusic: HTMLAudioElement | null = null;
   private musicStarted = false;
+  private isMusicMuted = false;
+  private musicButton: HTMLImageElement | null = null;
 
   // 🔥 Маппинг звуков на функции-загрузчики
   private readonly SOUND_LOADERS: Record<string, () => Promise<string>> = {
@@ -104,8 +108,13 @@ export class Game {
     this.showTutorial();
     this.setupControls();
     this.createCoinCounter();
+    this.createMusicControls();
     
-    window.addEventListener('resize', () => this.updateCoinCounterStyles());
+    window.addEventListener('resize', () => {
+      this.updateCoinCounterStyles();
+      this.updateMusicButtonStyles();
+    });
+    
     this.preloadCriticalSounds();
   }
 
@@ -151,7 +160,7 @@ export class Game {
   }
 
   private playBackgroundMusic(): void {
-    if (this.backgroundMusic && !this.musicStarted) {
+    if (this.backgroundMusic && !this.musicStarted && !this.isMusicMuted) {
       this.backgroundMusic.play()
         .then(() => { this.musicStarted = true; })
         .catch((err) => { console.warn('⚠️ Не удалось запустить музыку:', err); });
@@ -164,6 +173,158 @@ export class Game {
       this.backgroundMusic.currentTime = 0;
       this.musicStarted = false;
     }
+  }
+
+  private toggleMusic(): void {
+    this.isMusicMuted = !this.isMusicMuted;
+    
+    if (this.backgroundMusic) {
+      if (this.isMusicMuted) {
+        this.backgroundMusic.pause();
+        this.musicStarted = false;
+      } else {
+        this.backgroundMusic.play()
+          .then(() => { this.musicStarted = true; })
+          .catch(err => console.warn('⚠️ Не удалось возобновить музыку:', err));
+      }
+    }
+    
+    this.updateMusicButtonIcon();
+  }
+
+  private updateMusicButtonIcon(): void {
+    if (!this.musicButton) return;
+    
+    // Прямое обновление src у изображения
+    this.musicButton.src = this.isMusicMuted ? soundOffUrl : soundOnUrl;
+    this.musicButton.alt = this.isMusicMuted ? 'sound off' : 'sound on';
+  }
+
+  private createMusicControls(): void {
+    const container = document.createElement('div');
+    container.id = 'music-controls';
+    document.body.appendChild(container);
+
+    const img = document.createElement('img');
+    img.src = soundOnUrl;
+    img.alt = 'sound on';
+    img.draggable = false;
+    img.style.cssText = `
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      cursor: pointer;
+      filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+      transition: all 0.2s ease;
+    `;
+
+    container.appendChild(img);
+    this.musicButton = img;
+
+    // Добавляем обработчик клика
+    container.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleMusic();
+    });
+
+    // Добавляем hover эффекты
+    img.addEventListener('mouseenter', () => {
+      img.style.transform = 'scale(1.1)';
+      img.style.filter = 'drop-shadow(0 6px 12px rgba(0, 0, 0, 0.4))';
+    });
+
+    img.addEventListener('mouseleave', () => {
+      img.style.transform = 'scale(1)';
+      img.style.filter = 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))';
+    });
+
+    // Добавляем touch эффекты для мобильных
+    img.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      img.style.transform = 'scale(0.95)';
+    });
+
+    img.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      img.style.transform = 'scale(1)';
+    });
+
+    // Обновляем размеры при изменении окна
+    this.updateMusicButtonStyles();
+  }
+
+  private updateMusicButtonStyles(): void {
+    const container = document.getElementById('music-controls');
+    if (!container || !this.musicButton) return;
+
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    
+    // Адаптивные размеры на основе ширины экрана и ориентации
+    let buttonSize: number;
+    let bottomOffset: number;
+    let leftOffset: number;
+
+    if (width >= 1920) {
+      buttonSize = 70;
+      bottomOffset = 35;
+      leftOffset = 35;
+    } else if (width >= 1440) {
+      buttonSize = 60;
+      bottomOffset = 30;
+      leftOffset = 30;
+    } else if (width >= 1024) {
+      buttonSize = 55;
+      bottomOffset = 25;
+      leftOffset = 25;
+    } else if (width >= 768) {
+      buttonSize = 50;
+      bottomOffset = 20;
+      leftOffset = 20;
+    } else if (width >= 576) {
+      buttonSize = 45;
+      bottomOffset = 15;
+      leftOffset = 15;
+    } else if (width >= 425) {
+      buttonSize = 40;
+      bottomOffset = 12;
+      leftOffset = 12;
+    } else {
+      buttonSize = 35;
+      bottomOffset = 10;
+      leftOffset = 10;
+    }
+
+    // Для мобильных устройств в ландшафтной ориентации
+    if (height < 500 && width > height) {
+      buttonSize = Math.min(buttonSize, 40);
+      bottomOffset = 8;
+      leftOffset = 8;
+    }
+
+    container.style.cssText = `
+      position: fixed;
+      left: ${leftOffset}px;
+      bottom: ${bottomOffset}px;
+      width: ${buttonSize}px;
+      height: ${buttonSize}px;
+      z-index: 1000;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    `;
+
+    // Обновляем стили изображения
+    const img = this.musicButton as HTMLImageElement;
+    img.style.cssText = `
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      cursor: pointer;
+      filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+      transition: all 0.2s ease;
+    `;
   }
 
   private playStepSound(): void {
@@ -182,6 +343,7 @@ export class Game {
     coinIcon.src = coinTextureUrl;
     coinIcon.alt = 'coin';
     coinIcon.id = 'coin-icon';
+    coinIcon.draggable = false;
     coinIcon.onerror = () => {
       const fallbackSpan = document.createElement('span');
       fallbackSpan.innerHTML = '🪙';
@@ -722,8 +884,15 @@ export class Game {
       const diff = x - startX;
       if (Math.abs(diff) > 50) {
         this.player?.startMoving();
-        if (diff > 0) this.player?.moveRight();
-        else this.player?.moveLeft();
+        // ИСПРАВЛЕНО: инвертируем управление для свайпов
+        // Так как камера смотрит сзади, свайп влево должен двигать персонажа вправо на экране
+        if (diff > 0) {
+          console.log('👆 Свайп вправо -> движение влево');
+          this.player?.moveLeft(); // Свайп вправо = движение влево
+        } else {
+          console.log('👆 Свайп влево -> движение вправо');
+          this.player?.moveRight(); // Свайп влево = движение вправо
+        }
       }
     };
 
@@ -731,12 +900,20 @@ export class Game {
     window.addEventListener('mouseup', (e) => onEnd(e.clientX));
     window.addEventListener('touchstart', (e) => onStart(e.touches[0].clientX), { passive: true });
     window.addEventListener('touchend', (e) => onEnd(e.changedTouches[0].clientX), { passive: true });
+    
     window.addEventListener('keydown', (e) => {
       if (this.isFinished || this.isGameOver) return;
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
         this.player?.startMoving();
-        if (e.key === 'ArrowLeft') this.player?.moveLeft();
-        if (e.key === 'ArrowRight') this.player?.moveRight();
+        // Клавиши не инвертируем, так как они соответствуют физическому направлению
+        if (e.key === 'ArrowLeft') {
+          console.log('⬅️ Клавиша влево -> движение влево');
+          this.player?.moveLeft();
+        }
+        if (e.key === 'ArrowRight') {
+          console.log('➡️ Клавиша вправо -> движение вправо');
+          this.player?.moveRight();
+        }
       }
     });
   }
@@ -895,6 +1072,7 @@ export class Game {
   }
 
   private async playSound(name: string): Promise<void> {
+    // Звуковые эффекты всегда играют, независимо от состояния музыки
     try {
       let audio = this.soundCache.get(name);
 
@@ -939,7 +1117,7 @@ export class Game {
     document.body.appendChild(overlay);
 
     document.getElementById('cta')?.addEventListener('click', () => {
-      alert('🚀 Переход к установке...');
+      window.open('https://example.com/download', '_blank');
     });
 
     document.getElementById('retry')?.addEventListener('click', () => {
@@ -957,5 +1135,6 @@ export class Game {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.updateCoinCounterStyles();
+    this.updateMusicButtonStyles();
   }
 }
