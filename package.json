@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "devDependencies": {
+    "rollup-plugin-visualizer": "^7.0.1",
     "terser": "^5.46.0",
     "typescript": "~5.9.3",
     "vite": "^7.3.1",

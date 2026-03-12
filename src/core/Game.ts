@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import { World } from './World';
 import { Player } from './Player';
 import { Gate } from './Gate';
+import { AssetLoader } from './AssetLoader';
 
+// 🔥 ЗВУКИ — ленивая загрузка через dynamic import
+// 🔥 ТЕКСТУРЫ — статический импорт (маленький размер)
+import coinTextureUrl from '../assets/textures/coin.png?url';
 
 export class Game {
   private scene: THREE.Scene;
@@ -18,35 +22,40 @@ export class Game {
   private isFinished = false;
   private finishLineZ = 200;
   private activeEffects: Array<{ update(delta: number): boolean }> = [];
-  
   private readonly CAM_OFFSET_X = 0;
-  private readonly CAM_OFFSET_Y = 3.5;
-  private readonly CAM_OFFSET_Z = -5;
-  private readonly CAM_LOOKAHEAD = 8;
+  private readonly CAM_OFFSET_Y = 4.5;
+  private readonly CAM_OFFSET_Z = -8;
+  private readonly CAM_LOOKAHEAD = 10;
   private readonly CAM_SMOOTH = 0.1;
-  
   private tempVector = new THREE.Vector3();
   private coinCounterElement: HTMLElement | null = null;
   private coinIconElement: HTMLElement | null = null;
   private coinContainer: HTMLElement | null = null;
   
-  // 🔥 КЭШ ЗВУКОВ для предотвращения фризов
   private soundCache: Map<string, HTMLAudioElement> = new Map();
-  
-  // 🔥 Для звуков шагов
   private stepIndex = 0;
   private stepTimer = 0;
-  private readonly STEP_INTERVAL = 0.4; // Интервал между шагами (секунды)
-  
-  // 🔥 Для фоновой музыки
+  private readonly STEP_INTERVAL = 0.4;
   private backgroundMusic: HTMLAudioElement | null = null;
   private musicStarted = false;
+
+  // 🔥 Маппинг звуков на функции-загрузчики
+  private readonly SOUND_LOADERS: Record<string, () => Promise<string>> = {
+    'coin': () => import('../assets/sounds/coin.ogg?url').then(m => m.default),
+    'bomb': () => import('../assets/sounds/bomb.ogg?url').then(m => m.default),
+    'gate': () => import('../assets/sounds/gate.ogg?url').then(m => m.default),
+    'lose': () => import('../assets/sounds/STGR_Fail_Lose_forMUSIC_A_1.ogg?url').then(m => m.default),
+    'win': () => import('../assets/sounds/win.ogg?url').then(m => m.default),
+    'step_0': () => import('../assets/sounds/step_0.ogg?url').then(m => m.default),
+    'step_1': () => import('../assets/sounds/step_1.ogg?url').then(m => m.default),
+    'step_2': () => import('../assets/sounds/step_2.ogg?url').then(m => m.default),
+  };
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x87ceeb);
     this.scene.fog = new THREE.Fog(0x87ceeb, 20, 80);
-
+    
     this.camera = new THREE.PerspectiveCamera(
       45,
       window.innerWidth / window.innerHeight,
@@ -96,154 +105,88 @@ export class Game {
     this.setupControls();
     this.createCoinCounter();
     
-    // Добавляем слушатель изменения размера окна для адаптации счетчика
     window.addEventListener('resize', () => this.updateCoinCounterStyles());
-    
-    // 🔥 Предзагрузка звуков (включая музыку, звук проигрыша и победы)
-    this.preloadSounds();
+    this.preloadCriticalSounds();
   }
 
-  // 🔥 ПРЕДЗАГРУЗКА ЗВУКОВ (включая шаги, бомбу, ворота, проигрыш, победу и музыку)
-  private preloadSounds(): void {
-    // Добавляем все звуки: монета, бомба, ворота, шаги, проигрыш, победа
-    const sounds = ['coin', 'bomb', 'gate', 'lose', 'win', 'step_0', 'step_1', 'step_2'];
-    sounds.forEach(name => {
-      try {
-        // Пробуем загрузить .mp3
-        let audio = new Audio(`./sounds/${name}.mp3`);
-        
-        // Если .mp3 не загружается, пробуем .wav
-        audio.onerror = () => {
-          try {
-            const wavAudio = new Audio(`./sounds/${name}.wav`);
-            this.setupAudio(wavAudio, name);
-          } catch (e) {
-            console.warn(`⚠️ Не удалось загрузить звук "${name}" ни в .mp3, ни в .wav`);
-          }
-        };
-        
-        this.setupAudio(audio, name);
-      } catch (e) {
-        // Если .mp3 не существует, пробуем .wav
-        try {
-          const wavAudio = new Audio(`./sounds/${name}.wav`);
-          this.setupAudio(wavAudio, name);
-        } catch (err) {
-          console.warn(`⚠️ Не удалось предзагрузить звук "${name}"`);
-        }
+  private preloadCriticalSounds(): void {
+    const critical = ['step_0', 'step_1', 'step_2'];
+    critical.forEach(name => {
+      const loader = this.SOUND_LOADERS[name];
+      if (loader) {
+        AssetLoader.loadSound(name, loader).then(audio => {
+          this.setupAudio(audio, name);
+        }).catch(err => {
+          console.warn(`⚠️ Не удалось предзагрузить звук "${name}"`, err);
+        });
       }
     });
-    
-    // 🔥 Загружаем фоновую музыку отдельно (WAV файл с длинным названием)
+    this.loadBackgroundMusic();
+  }
+
+  private async loadBackgroundMusic(): Promise<void> {
     try {
-      // Пробуем загрузить с оригинальным именем
-      let musicPath = './sounds/music_halloween party [loop].wav';
-      
-      // Создаем элемент аудио для музыки
-      const music = new Audio(musicPath);
-      music.loop = true; // Зацикливаем
-      music.volume = 0.3; // Тише, чем звуки эффектов
-      
-      // Добавляем обработчик ошибки на случай если файл не найден
-      music.onerror = () => {
-        console.warn('⚠️ Не удалось загрузить музыку с оригинальным именем, пробуем music.mp3');
-        // Пробуем загрузить как music.mp3
-        const fallbackMusic = new Audio('./sounds/music.mp3');
-        fallbackMusic.loop = true;
-        fallbackMusic.volume = 0.3;
-        this.backgroundMusic = fallbackMusic;
-        console.log('✅ Музыка предзагружена (fallback): music.mp3');
-      };
-      
+      const url = await import('../assets/sounds/music_halloween party [loop].ogg?url').then(m => m.default);
+      const music = new Audio(url);
+      music.loop = true;
+      music.volume = 0.3;
       music.oncanplaythrough = () => {
-        console.log('✅ Музыка успешно загружена и готова к воспроизведению');
+        console.log('✅ Музыка готова');
       };
-      
       this.backgroundMusic = music;
-      console.log('✅ Музыка предзагружена:', musicPath);
     } catch (e) {
       console.warn('⚠️ Не удалось предзагрузить музыку:', e);
     }
   }
 
-  // 🔥 Вспомогательный метод для настройки аудио
   private setupAudio(audio: HTMLAudioElement, name: string): void {
-    // Устанавливаем разную громкость для разных типов звуков
-    if (name.startsWith('step')) {
-      audio.volume = 0.25; // Шаги тише
-    } else if (name === 'bomb') {
-      audio.volume = 0.6; // Взрыв чуть громче
-    } else if (name === 'gate') {
-      audio.volume = 1.0; // 🔥 МАКСИМАЛЬНАЯ ГРОМКОСТЬ ВОРОТ
-    } else if (name === 'lose') {
-      audio.volume = 0.7; // Звук проигрыша
-    } else if (name === 'win') {
-      audio.volume = 0.8; // 🏆 Звук победы
-    } else {
-      audio.volume = 0.5; // Остальные звуки
-    }
+    if (name.startsWith('step')) audio.volume = 0.25;
+    else if (name === 'bomb') audio.volume = 0.6;
+    else if (name === 'gate') audio.volume = 1.0;
+    else if (name === 'lose') audio.volume = 0.7;
+    else if (name === 'win') audio.volume = 0.8;
+    else audio.volume = 0.5;
+    
     this.soundCache.set(name, audio);
-    console.log(`✅ Звук предзагружен: ${name} (громкость: ${audio.volume})`);
   }
 
-  // 🔥 Воспроизведение фоновой музыки
   private playBackgroundMusic(): void {
     if (this.backgroundMusic && !this.musicStarted) {
       this.backgroundMusic.play()
-        .then(() => {
-          this.musicStarted = true;
-          console.log('🎵 Фоновая музыка запущена');
-        })
-        .catch((err) => {
-          console.warn('⚠️ Не удалось запустить музыку:', err);
-          // Некоторые браузеры блокируют автовоспроизведение до взаимодействия пользователя
-        });
+        .then(() => { this.musicStarted = true; })
+        .catch((err) => { console.warn('⚠️ Не удалось запустить музыку:', err); });
     }
   }
 
-  // 🔥 Остановка фоновой музыки
   private stopBackgroundMusic(): void {
     if (this.backgroundMusic && this.musicStarted) {
       this.backgroundMusic.pause();
       this.backgroundMusic.currentTime = 0;
       this.musicStarted = false;
-      console.log('🎵 Фоновая музыка остановлена');
     }
   }
 
-  // 🔥 Воспроизведение звука шага
   private playStepSound(): void {
     if (!this.player || this.isGameOver || this.isFinished) return;
-    
     const stepName = `step_${this.stepIndex}`;
     this.playSound(stepName);
-    this.stepIndex = (this.stepIndex + 1) % 3; // Циклически 0,1,2,0,1,2...
+    this.stepIndex = (this.stepIndex + 1) % 3;
   }
 
-  // 🔥 АДАПТИВНЫЙ СЧЕТЧИК с исправленными брейкпоинтами
   private createCoinCounter(): void {
-    // Контейнер с адаптивными стилями
     const container = document.createElement('div');
     container.id = 'coin-counter-container';
     document.body.appendChild(container);
-    
-    // Монета
+
     const coinIcon = document.createElement('img');
-    coinIcon.src = './textures/coin.png';
+    coinIcon.src = coinTextureUrl;
     coinIcon.alt = 'coin';
     coinIcon.id = 'coin-icon';
-    
-    // Резервный вариант при ошибке загрузки
     coinIcon.onerror = () => {
-      console.warn('⚠️ Не удалось загрузить coin.png, используем эмодзи');
       const fallbackSpan = document.createElement('span');
       fallbackSpan.innerHTML = '🪙';
       fallbackSpan.id = 'coin-icon-fallback';
-      fallbackSpan.style.cssText = `
-        font-size: inherit;
-        line-height: 1;
-        display: inline-block;
-      `;
+      fallbackSpan.style.cssText = `font-size: inherit; line-height: 1; display: inline-block;`;
       coinIcon.replaceWith(fallbackSpan);
       this.coinIconElement = fallbackSpan;
     };
@@ -254,306 +197,62 @@ export class Game {
 
     container.appendChild(coinIcon);
     container.appendChild(countText);
-    
+
     this.coinContainer = container;
     this.coinCounterElement = countText;
     this.coinIconElement = coinIcon;
-    
-    // Применяем адаптивные стили
     this.updateCoinCounterStyles();
   }
 
-  // 🔥 ИСПРАВЛЕННЫЙ МЕТОД ДЛЯ ОБНОВЛЕНИЯ АДАПТИВНЫХ СТИЛЕЙ
   private updateCoinCounterStyles(): void {
     if (!this.coinContainer) return;
-    
     const width = window.innerWidth;
     
-    // Базовые стили для контейнера
-    let containerStyles = `
-      position: fixed;
-      left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
-      box-shadow: 0 4px 14px rgba(255, 107, 107, 0.5);
-      z-index: 100;
-      font-family: 'Arial', sans-serif;
-      pointer-events: none;
-      overflow: visible;
-      border: 2px solid rgba(255, 255, 255, 0.22);
-      transition: all 0.3s ease;
-    `;
-    
-    // Стили для иконки
-    let iconStyles = `
-      object-fit: contain;
-      filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55));
-      z-index: 101;
-      position: relative;
-      transition: all 0.3s ease;
-    `;
-    
-    // Стили для текста
-    let textStyles = `
-      color: #ffd700;
-      font-weight: bold;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
-      text-align: center;
-      letter-spacing: 1.5px;
-      line-height: 1;
-      transition: all 0.3s ease;
-    `;
-    
-    // Прогрессивная шкала
+    let containerStyles = `position: fixed; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: flex-end; background: linear-gradient(135deg, #ff6b6b, #ff8e8e); box-shadow: 0 4px 14px rgba(255, 107, 107, 0.5); z-index: 100; font-family: 'Arial', sans-serif; pointer-events: none; overflow: visible; border: 2px solid rgba(255, 255, 255, 0.22); transition: all 0.3s ease;`;
+    let iconStyles = `object-fit: contain; filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55)); z-index: 101; position: relative; transition: all 0.3s ease;`;
+    let textStyles = `color: #ffd700; font-weight: bold; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5); text-align: center; letter-spacing: 1.5px; line-height: 1; transition: all 0.3s ease;`;
+
     if (width >= 1920) {
-      containerStyles += `
-        top: 45px;
-        padding: 6px 28px 6px 0;
-        height: 44px;
-        min-width: 160px;
-        border-radius: 24px;
-      `;
-      iconStyles += `
-        width: 76px;
-        height: 76px;
-        margin-left: -86px;
-        margin-right: -22px;
-        margin-top: -24px;
-        margin-bottom: -24px;
-        left: -28px;
-        transform: scale(1.06);
-      `;
-      textStyles += `
-        font-size: 30px;
-        min-width: 80px;
-        margin-right: 6px;
-      `;
+      containerStyles += `top: 45px; padding: 6px 28px 6px 0; height: 44px; min-width: 160px; border-radius: 24px;`;
+      iconStyles += `width: 76px; height: 76px; margin-left: -86px; margin-right: -22px; margin-top: -24px; margin-bottom: -24px; left: -28px; transform: scale(1.06);`;
+      textStyles += `font-size: 30px; min-width: 80px; margin-right: 6px;`;
+    } else if (width >= 1440) {
+      containerStyles += `top: 25px; padding: 3px 18px 3px 0; height: 30px; min-width: 110px; border-radius: 16px;`;
+      iconStyles += `width: 52px; height: 52px; margin-left: -62px; margin-right: -14px; margin-top: -16px; margin-bottom: -16px; left: -19px; transform: scale(1.02);`;
+      textStyles += `font-size: 20px; min-width: 55px; margin-right: 3px;`;
+    } else if (width >= 1024) {
+      containerStyles += `top: 20px; padding: 3px 16px 3px 0; height: 28px; min-width: 100px; border-radius: 15px;`;
+      iconStyles += `width: 48px; height: 48px; margin-left: -56px; margin-right: -12px; margin-top: -14px; margin-bottom: -14px; left: -17px; transform: scale(1.02);`;
+      textStyles += `font-size: 18px; min-width: 50px; margin-right: 3px;`;
+    } else if (width >= 768) {
+      containerStyles += `top: 18px; padding: 2px 14px 2px 0; height: 26px; min-width: 90px; border-radius: 14px;`;
+      iconStyles += `width: 44px; height: 44px; margin-left: -50px; margin-right: -10px; margin-top: -12px; margin-bottom: -12px; left: -15px; transform: scale(1.01);`;
+      textStyles += `font-size: 16px; min-width: 45px; margin-right: 2px;`;
+    } else if (width >= 576) {
+      containerStyles += `top: 16px; padding: 2px 12px 2px 0; height: 24px; min-width: 80px; border-radius: 12px;`;
+      iconStyles += `width: 40px; height: 40px; margin-left: -46px; margin-right: -8px; margin-top: -10px; margin-bottom: -10px; left: -13px; transform: scale(1);`;
+      textStyles += `font-size: 15px; min-width: 40px; margin-right: 2px;`;
+    } else if (width >= 425) {
+      containerStyles += `top: 14px; padding: 2px 10px 2px 0; height: 22px; min-width: 70px; border-radius: 11px;`;
+      iconStyles += `width: 36px; height: 36px; margin-left: -42px; margin-right: -6px; margin-top: -9px; margin-bottom: -9px; left: -11px; transform: scale(0.99);`;
+      textStyles += `font-size: 14px; min-width: 35px; margin-right: 2px;`;
+    } else {
+      containerStyles += `top: 12px; padding: 2px 8px 2px 0; height: 20px; min-width: 60px; border-radius: 10px;`;
+      iconStyles += `width: 32px; height: 32px; margin-left: -38px; margin-right: -4px; margin-top: -8px; margin-bottom: -8px; left: -9px; transform: scale(0.98);`;
+      textStyles += `font-size: 13px; min-width: 30px; margin-right: 2px;`;
     }
-    else if (width >= 1440) {
-      containerStyles += `
-        top: 25px;
-        padding: 3px 18px 3px 0;
-        height: 30px;
-        min-width: 110px;
-        border-radius: 16px;
-      `;
-      iconStyles += `
-        width: 52px;
-        height: 52px;
-        margin-left: -62px;
-        margin-right: -14px;
-        margin-top: -16px;
-        margin-bottom: -16px;
-        left: -19px;
-        transform: scale(1.02);
-      `;
-      textStyles += `
-        font-size: 20px;
-        min-width: 55px;
-        margin-right: 3px;
-      `;
-    } 
-    else if (width >= 1024) {
-      containerStyles += `
-        top: 20px;
-        padding: 3px 16px 3px 0;
-        height: 28px;
-        min-width: 100px;
-        border-radius: 15px;
-      `;
-      iconStyles += `
-        width: 48px;
-        height: 48px;
-        margin-left: -56px;
-        margin-right: -12px;
-        margin-top: -14px;
-        margin-bottom: -14px;
-        left: -17px;
-        transform: scale(1.02);
-      `;
-      textStyles += `
-        font-size: 18px;
-        min-width: 50px;
-        margin-right: 3px;
-      `;
-    } 
-    else if (width >= 768) {
-      containerStyles += `
-        top: 18px;
-        padding: 2px 14px 2px 0;
-        height: 26px;
-        min-width: 90px;
-        border-radius: 14px;
-      `;
-      iconStyles += `
-        width: 44px;
-        height: 44px;
-        margin-left: -50px;
-        margin-right: -10px;
-        margin-top: -12px;
-        margin-bottom: -12px;
-        left: -15px;
-        transform: scale(1.01);
-      `;
-      textStyles += `
-        font-size: 16px;
-        min-width: 45px;
-        margin-right: 2px;
-      `;
-    } 
-    else if (width >= 576) {
-      containerStyles += `
-        top: 16px;
-        padding: 2px 12px 2px 0;
-        height: 24px;
-        min-width: 80px;
-        border-radius: 12px;
-      `;
-      iconStyles += `
-        width: 40px;
-        height: 40px;
-        margin-left: -46px;
-        margin-right: -8px;
-        margin-top: -10px;
-        margin-bottom: -10px;
-        left: -13px;
-        transform: scale(1);
-      `;
-      textStyles += `
-        font-size: 15px;
-        min-width: 40px;
-        margin-right: 2px;
-      `;
-    } 
-    else if (width >= 425) {
-      containerStyles += `
-        top: 14px;
-        padding: 2px 10px 2px 0;
-        height: 22px;
-        min-width: 70px;
-        border-radius: 11px;
-      `;
-      iconStyles += `
-        width: 36px;
-        height: 36px;
-        margin-left: -42px;
-        margin-right: -6px;
-        margin-top: -9px;
-        margin-bottom: -9px;
-        left: -11px;
-        transform: scale(0.99);
-      `;
-      textStyles += `
-        font-size: 14px;
-        min-width: 35px;
-        margin-right: 2px;
-      `;
-    }
-    else {
-      containerStyles += `
-        top: 12px;
-        padding: 2px 8px 2px 0;
-        height: 20px;
-        min-width: 60px;
-        border-radius: 10px;
-      `;
-      iconStyles += `
-        width: 32px;
-        height: 32px;
-        margin-left: -38px;
-        margin-right: -4px;
-        margin-top: -8px;
-        margin-bottom: -8px;
-        left: -9px;
-        transform: scale(0.98);
-      `;
-      textStyles += `
-        font-size: 13px;
-        min-width: 30px;
-        margin-right: 2px;
-      `;
-    }
-    
-    // Применяем стили к контейнеру
+
     this.coinContainer.style.cssText = containerStyles;
     
-    // Применяем стили к иконке
     const icon = this.coinIconElement;
     if (icon && icon.tagName === 'IMG') {
       (icon as HTMLImageElement).style.cssText = iconStyles;
-    } else if (icon && icon.id === 'coin-icon-fallback') {
-      let emojiSize, emojiMarginLeft, emojiMarginRight, emojiMarginTop, emojiMarginBottom, emojiLeft;
-      
-      if (width >= 1920) {
-        emojiSize = '76px';
-        emojiMarginLeft = '-86px';
-        emojiMarginRight = '-22px';
-        emojiMarginTop = '-24px';
-        emojiMarginBottom = '-24px';
-        emojiLeft = '-28px';
-      } else if (width >= 1440) {
-        emojiSize = '52px';
-        emojiMarginLeft = '-62px';
-        emojiMarginRight = '-14px';
-        emojiMarginTop = '-16px';
-        emojiMarginBottom = '-16px';
-        emojiLeft = '-19px';
-      } else if (width >= 1024) {
-        emojiSize = '48px';
-        emojiMarginLeft = '-56px';
-        emojiMarginRight = '-12px';
-        emojiMarginTop = '-14px';
-        emojiMarginBottom = '-14px';
-        emojiLeft = '-17px';
-      } else if (width >= 768) {
-        emojiSize = '44px';
-        emojiMarginLeft = '-50px';
-        emojiMarginRight = '-10px';
-        emojiMarginTop = '-12px';
-        emojiMarginBottom = '-12px';
-        emojiLeft = '-15px';
-      } else if (width >= 576) {
-        emojiSize = '40px';
-        emojiMarginLeft = '-46px';
-        emojiMarginRight = '-8px';
-        emojiMarginTop = '-10px';
-        emojiMarginBottom = '-10px';
-        emojiLeft = '-13px';
-      } else if (width >= 425) {
-        emojiSize = '36px';
-        emojiMarginLeft = '-42px';
-        emojiMarginRight = '-6px';
-        emojiMarginTop = '-9px';
-        emojiMarginBottom = '-9px';
-        emojiLeft = '-11px';
-      } else {
-        emojiSize = '32px';
-        emojiMarginLeft = '-38px';
-        emojiMarginRight = '-4px';
-        emojiMarginTop = '-8px';
-        emojiMarginBottom = '-8px';
-        emojiLeft = '-9px';
-      }
-      
-      icon.style.cssText = `
-        font-size: ${emojiSize};
-        filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55));
-        margin-left: ${emojiMarginLeft};
-        margin-right: ${emojiMarginRight};
-        margin-top: ${emojiMarginTop};
-        margin-bottom: ${emojiMarginBottom};
-        z-index: 101;
-        position: relative;
-        left: ${emojiLeft};
-        transition: all 0.3s ease;
-        line-height: 1;
-        display: inline-block;
-      `;
+    } else if (icon && (icon as HTMLElement).id === 'coin-icon-fallback') {
+      let emojiSize = width >= 1920 ? '76px' : width >= 1440 ? '52px' : width >= 1024 ? '48px' : width >= 768 ? '44px' : width >= 576 ? '40px' : width >= 425 ? '36px' : '32px';
+      let emojiLeft = width >= 1920 ? '-28px' : width >= 1440 ? '-19px' : width >= 1024 ? '-17px' : width >= 768 ? '-15px' : width >= 576 ? '-13px' : width >= 425 ? '-11px' : '-9px';
+      icon.style.cssText = `font-size: ${emojiSize}; filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55)); z-index: 101; position: relative; left: ${emojiLeft}; transition: all 0.3s ease; line-height: 1; display: inline-block;`;
     }
-    
+
     if (this.coinCounterElement) {
       this.coinCounterElement.style.cssText = textStyles;
     }
@@ -578,7 +277,7 @@ export class Game {
         const isBlack = (i + j) % 2 === 0;
         const color = isBlack ? 0x000000 : 0xffffff;
         const emissiveColor = isBlack ? 0x111111 : 0x444444;
-        
+
         const material = new THREE.MeshStandardMaterial({
           color: color,
           emissive: emissiveColor,
@@ -589,10 +288,8 @@ export class Game {
 
         const geometry = new THREE.BoxGeometry(tileSize - 0.02, 0.05, tileSize - 0.02);
         const tile = new THREE.Mesh(geometry, material);
-        
         const xPos = -totalWidth/2 + i * tileSize + tileSize/2;
         const zPos = this.finishLineZ - totalLength/2 + j * tileSize + tileSize/2;
-        
         tile.position.set(xPos, 0.02, zPos);
         tile.receiveShadow = true;
         tile.castShadow = false;
@@ -608,9 +305,7 @@ export class Game {
     this.createSparksAndDebris(position);
     this.createFireball(position);
     this.createSmoke(position);
-    setTimeout(() => {
-      this.createShockwave(position);
-    }, 300);
+    setTimeout(() => { this.createShockwave(position); }, 300);
   }
 
   private createFlashLight(position: THREE.Vector3): void {
@@ -641,23 +336,19 @@ export class Game {
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
-    
+
     for (let i = 0; i < particleCount; i++) {
       positions[i*3] = position.x;
       positions[i*3+1] = position.y;
       positions[i*3+2] = position.z;
-      
-      const r = 1.0;
-      const g = 0.6 + Math.random() * 0.4;
-      const b = 0.1 + Math.random() * 0.2;
-      colors[i*3] = r;
-      colors[i*3+1] = g;
-      colors[i*3+2] = b;
+      colors[i*3] = 1.0;
+      colors[i*3+1] = 0.6 + Math.random() * 0.4;
+      colors[i*3+2] = 0.1 + Math.random() * 0.2;
     }
-    
+
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    
+
     const material = new THREE.PointsMaterial({
       size: 0.4,
       vertexColors: true,
@@ -667,10 +358,10 @@ export class Game {
       opacity: 1.0,
       sizeAttenuation: true
     });
-    
+
     const particles = new THREE.Points(geometry, material);
     this.scene.add(particles);
-    
+
     const velocities: THREE.Vector3[] = [];
     for (let i = 0; i < particleCount; i++) {
       const theta = Math.random() * Math.PI * 2;
@@ -682,27 +373,23 @@ export class Game {
         Math.cos(phi) * speed
       ));
     }
-    
+
     let life = 0;
     const maxLife = 0.8;
     const effect = {
       update: (delta: number): boolean => {
         life += delta;
         const progress = life / maxLife;
-        
         const posAttr = geometry.attributes.position;
         const posArray = posAttr.array as Float32Array;
-        
         for (let i = 0; i < particleCount; i++) {
           posArray[i*3] = position.x + velocities[i].x * progress * 2;
           posArray[i*3+1] = position.y + velocities[i].y * progress * 2;
           posArray[i*3+2] = position.z + velocities[i].z * progress * 2;
         }
         posAttr.needsUpdate = true;
-        
         material.opacity = 1 - progress * 1.5;
         material.size = 0.4 * (1 - progress * 0.5);
-        
         if (life >= maxLife) {
           this.scene.remove(particles);
           geometry.dispose();
@@ -719,20 +406,19 @@ export class Game {
     const particleCount = 30;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
-    
+
     for (let i = 0; i < particleCount; i++) {
       positions[i*3] = position.x;
       positions[i*3+1] = position.y;
       positions[i*3+2] = position.z;
     }
-    
+
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    
+
     const canvas = document.createElement('canvas');
     canvas.width = 32;
     canvas.height = 32;
     const ctx = canvas.getContext('2d')!;
-    
     const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
     gradient.addColorStop(0, 'rgba(255,255,255,1)');
     gradient.addColorStop(0.4, 'rgba(255,200,100,1)');
@@ -740,9 +426,8 @@ export class Game {
     gradient.addColorStop(1, 'rgba(255,0,0,0)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 32, 32);
-    
+
     const texture = new THREE.CanvasTexture(canvas);
-    
     const material = new THREE.PointsMaterial({
       size: 1.5,
       map: texture,
@@ -753,10 +438,10 @@ export class Game {
       sizeAttenuation: true,
       color: 0xffaa33
     });
-    
+
     const particles = new THREE.Points(geometry, material);
     this.scene.add(particles);
-    
+
     const velocities: THREE.Vector3[] = [];
     for (let i = 0; i < particleCount; i++) {
       const theta = Math.random() * Math.PI * 2;
@@ -768,27 +453,23 @@ export class Game {
         Math.cos(phi) * speed
       ));
     }
-    
+
     let life = 0;
     const maxLife = 1.5;
     const effect = {
       update: (delta: number): boolean => {
         life += delta;
         const progress = life / maxLife;
-        
         const posAttr = geometry.attributes.position;
         const posArray = posAttr.array as Float32Array;
-        
         for (let i = 0; i < particleCount; i++) {
           posArray[i*3] = position.x + velocities[i].x * life * 1.5;
           posArray[i*3+1] = position.y + 0.5 + velocities[i].y * life * 1.2;
           posArray[i*3+2] = position.z + velocities[i].z * life * 1.5;
         }
         posAttr.needsUpdate = true;
-        
         material.opacity = 0.9 * (1 - progress * 0.8);
         material.size = 1.5 * (1 + progress);
-        
         if (life >= maxLife) {
           this.scene.remove(particles);
           geometry.dispose();
@@ -806,29 +487,27 @@ export class Game {
     const particleCount = 25;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
-    
+
     for (let i = 0; i < particleCount; i++) {
       positions[i*3] = position.x;
       positions[i*3+1] = position.y;
       positions[i*3+2] = position.z;
     }
-    
+
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    
+
     const canvas = document.createElement('canvas');
     canvas.width = 32;
     canvas.height = 32;
     const ctx = canvas.getContext('2d')!;
-    
     const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
     gradient.addColorStop(0, 'rgba(100,100,100,0.8)');
     gradient.addColorStop(0.5, 'rgba(80,80,80,0.5)');
     gradient.addColorStop(1, 'rgba(50,50,50,0)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 32, 32);
-    
+
     const texture = new THREE.CanvasTexture(canvas);
-    
     const material = new THREE.PointsMaterial({
       size: 2.0,
       map: texture,
@@ -839,10 +518,10 @@ export class Game {
       sizeAttenuation: true,
       color: 0x888888
     });
-    
+
     const particles = new THREE.Points(geometry, material);
     this.scene.add(particles);
-    
+
     const velocities: THREE.Vector3[] = [];
     for (let i = 0; i < particleCount; i++) {
       const theta = Math.random() * Math.PI * 2;
@@ -853,27 +532,23 @@ export class Game {
         Math.sin(theta) * speed
       ));
     }
-    
+
     let life = 0;
     const maxLife = 2.2;
     const effect = {
       update: (delta: number): boolean => {
         life += delta;
         const progress = life / maxLife;
-        
         const posAttr = geometry.attributes.position;
         const posArray = posAttr.array as Float32Array;
-        
         for (let i = 0; i < particleCount; i++) {
           posArray[i*3] = position.x + velocities[i].x * life * 1.5;
           posArray[i*3+1] = position.y + 1.0 + velocities[i].y * life * 2;
           posArray[i*3+2] = position.z + velocities[i].z * life * 1.5;
         }
         posAttr.needsUpdate = true;
-        
         material.opacity = 0.6 * (1 - progress * 0.7);
         material.size = 2.0 * (1 + progress);
-        
         if (life >= maxLife) {
           this.scene.remove(particles);
           geometry.dispose();
@@ -892,23 +567,19 @@ export class Game {
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
-    
+
     for (let i = 0; i < particleCount; i++) {
       positions[i*3] = position.x;
       positions[i*3+1] = position.y;
       positions[i*3+2] = position.z;
-      
-      const r = 0.9 + Math.random() * 0.3;
-      const g = 0.7 + Math.random() * 0.3;
-      const b = 0.3 + Math.random() * 0.3;
-      colors[i*3] = r;
-      colors[i*3+1] = g;
-      colors[i*3+2] = b;
+      colors[i*3] = 0.9 + Math.random() * 0.3;
+      colors[i*3+1] = 0.7 + Math.random() * 0.3;
+      colors[i*3+2] = 0.3 + Math.random() * 0.3;
     }
-    
+
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    
+
     const material = new THREE.PointsMaterial({
       size: 0.2,
       vertexColors: true,
@@ -918,10 +589,10 @@ export class Game {
       opacity: 1.0,
       sizeAttenuation: true
     });
-    
+
     const particles = new THREE.Points(geometry, material);
     this.scene.add(particles);
-    
+
     const velocities: THREE.Vector3[] = [];
     for (let i = 0; i < particleCount; i++) {
       const theta = Math.random() * Math.PI * 2;
@@ -933,27 +604,23 @@ export class Game {
         Math.cos(phi) * speed
       ));
     }
-    
+
     let life = 0;
     const maxLife = 1.0;
     const effect = {
       update: (delta: number): boolean => {
         life += delta;
         const progress = life / maxLife;
-        
         const posAttr = geometry.attributes.position;
         const posArray = posAttr.array as Float32Array;
-        
         for (let i = 0; i < particleCount; i++) {
           posArray[i*3] = position.x + velocities[i].x * life * 2;
           posArray[i*3+1] = position.y + velocities[i].y * life * 2;
           posArray[i*3+2] = position.z + velocities[i].z * life * 2;
         }
         posAttr.needsUpdate = true;
-        
         material.opacity = 1 - progress * 1.5;
         material.size = 0.2 * (1 - progress * 0.8);
-        
         if (life >= maxLife) {
           this.scene.remove(particles);
           geometry.dispose();
@@ -974,7 +641,6 @@ export class Game {
     canvas.width = 64;
     canvas.height = 64;
     const ctx = canvas.getContext('2d')!;
-    
     const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
     gradient.addColorStop(0, 'rgba(255,255,255,0)');
     gradient.addColorStop(0.3, 'rgba(255,200,100,0.8)');
@@ -982,9 +648,8 @@ export class Game {
     gradient.addColorStop(1, 'rgba(255,0,0,0)');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 64, 64);
-    
+
     const texture = new THREE.CanvasTexture(canvas);
-    
     const material = new THREE.MeshBasicMaterial({
       map: texture,
       transparent: true,
@@ -992,13 +657,13 @@ export class Game {
       side: THREE.DoubleSide,
       depthWrite: false
     });
-    
+
     const ring = new THREE.Mesh(geometry, material);
     ring.position.copy(position);
     ring.position.y += 0.5;
     ring.rotation.x = Math.PI / 2;
     this.scene.add(ring);
-    
+
     let life = 0;
     const maxLife = 0.8;
     const effect = {
@@ -1008,7 +673,6 @@ export class Game {
         const scale = 1 + progress * 5;
         ring.scale.set(scale, scale, scale);
         ring.material.opacity = 1 - progress;
-        
         if (life >= maxLife) {
           this.scene.remove(ring);
           geometry.dispose();
@@ -1025,15 +689,7 @@ export class Game {
   private showTutorial(): void {
     const overlay = document.createElement('div');
     overlay.id = 'tutorial';
-    overlay.style.cssText = `
-      position: fixed; top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: rgba(0,0,0,0.7);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      color: white; font-family: sans-serif;
-      z-index: 1000; pointer-events: auto;
-    `;
+    overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: sans-serif; z-index: 1000; pointer-events: auto;`;
     overlay.innerHTML = `
       <h2 style="font-size: 28px; margin-bottom: 20px;">🎮 Как играть</h2>
       <p style="font-size: 18px; margin: 10px;">👆 Свайпни <b>влево/вправо</b> для движения</p>
@@ -1044,24 +700,22 @@ export class Game {
       <p style="font-size: 18px; margin: 10px; margin-top: 30px; opacity: 0.8;">Нажми любую клавишу чтобы начать</p>
     `;
     document.body.appendChild(overlay);
-    
+
     const hide = () => {
       if (this.isTutorialVisible) {
         this.isTutorialVisible = false;
         overlay.remove();
         this.player?.startRunning();
-        // 🔥 Запускаем музыку после закрытия туториала
         this.playBackgroundMusic();
       }
     };
-    
+
     overlay.addEventListener('click', hide);
     overlay.addEventListener('touchstart', hide);
   }
 
   private setupControls(): void {
     let startX = 0;
-    
     const onStart = (x: number) => { startX = x; };
     const onEnd = (x: number) => {
       if (this.isFinished || this.isGameOver) return;
@@ -1072,12 +726,11 @@ export class Game {
         else this.player?.moveLeft();
       }
     };
-    
+
     window.addEventListener('mousedown', (e) => onStart(e.clientX));
     window.addEventListener('mouseup', (e) => onEnd(e.clientX));
     window.addEventListener('touchstart', (e) => onStart(e.touches[0].clientX), { passive: true });
     window.addEventListener('touchend', (e) => onEnd(e.changedTouches[0].clientX), { passive: true });
-    
     window.addEventListener('keydown', (e) => {
       if (this.isFinished || this.isGameOver) return;
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
@@ -1095,13 +748,11 @@ export class Game {
 
   private animate = (): void => {
     requestAnimationFrame(this.animate);
-    
     const delta = Math.min(this.clock.getDelta(), 0.1);
-    
+
     if (this.player) {
       this.player.update(delta);
       
-      // Звуки шагов
       if (this.player.isMovingForward() && !this.isGameOver && !this.isFinished) {
         this.stepTimer += delta;
         if (this.stepTimer >= this.STEP_INTERVAL) {
@@ -1109,58 +760,55 @@ export class Game {
           this.playStepSound();
         }
       }
-      
+
       if (this.world && !this.isFinished) {
         this.world.update(this.player.getPosition().z);
       }
-      
+
       if (!this.isFinished && !this.isGameOver && this.player.getPosition().z >= this.finishLineZ) {
         this.handleFinish();
       }
-      
+
       if (!this.isFinished && !this.isGameOver) {
         this.checkCollisions();
       }
-      
+
       const pos = this.player.getPosition();
       this.camera.position.x += (pos.x - this.camera.position.x) * this.CAM_SMOOTH;
       this.camera.position.y += (this.CAM_OFFSET_Y - this.camera.position.y) * this.CAM_SMOOTH;
       this.camera.position.z += (pos.z + this.CAM_OFFSET_Z - this.camera.position.z) * this.CAM_SMOOTH;
       this.camera.lookAt(pos.x, 1.5, pos.z + this.CAM_LOOKAHEAD);
-      
+
       if (this.characterLight) {
         this.characterLight.position.x = pos.x;
         this.characterLight.position.z = pos.z + 2;
       }
     }
-    
+
     for (let i = this.activeEffects.length - 1; i >= 0; i--) {
       const completed = this.activeEffects[i].update(delta);
       if (completed) {
         this.activeEffects.splice(i, 1);
       }
     }
-    
+
     this.renderer.render(this.scene, this.camera);
   };
 
   private handleFinish(): void {
     if (this.isFinished) return;
     this.isFinished = true;
-    
+
     if (this.player) {
       this.player.stopMoving();
     }
-    
+
     if (this.world) {
       this.world.clearAllObjects();
     }
-    
+
     if (this.player && !this.isGameOver) {
       this.player.faceCamera();
-      
-      // 🏆 Воспроизводим звук победы
-      console.log('🏆 Достигнут финиш, играем звук победы');
       this.playSound('win');
       
       setTimeout(() => {
@@ -1177,31 +825,23 @@ export class Game {
 
   private checkCollisions(): void {
     if (!this.player || !this.world || this.isGameOver || this.isFinished) return;
-    
+
     const playerPos = this.player.getPosition();
     const objects = this.world.getActiveObjects();
-    
+
     for (let i = objects.length - 1; i >= 0; i--) {
       const obj = objects[i];
       const type = (obj as any).type as string;
-      
       obj.getWorldPosition(this.tempVector);
-      
       const distance = playerPos.distanceTo(this.tempVector);
+
       let shouldCollide = false;
-      
       switch (type) {
-        case 'bomb':
-          shouldCollide = distance < 0.5;
-          break;
-        case 'coin':
-          shouldCollide = distance < 0.8;
-          break;
-        case 'gate':
-          shouldCollide = distance < 2.5;
-          break;
+        case 'bomb': shouldCollide = distance < 0.5; break;
+        case 'coin': shouldCollide = distance < 0.8; break;
+        case 'gate': shouldCollide = distance < 2.5; break;
       }
-      
+
       if (shouldCollide) {
         this.handleCollision(obj, this.tempVector.clone());
       }
@@ -1210,27 +850,22 @@ export class Game {
 
   private handleCollision(obj: THREE.Object3D, objPos: THREE.Vector3): void {
     const type = (obj as any).type as string;
-    
+
     switch (type) {
       case 'coin':
-        if ((obj as any).isCollected) {
-          return;
-        }
-        
+        if ((obj as any).isCollected) return;
         this.score += 1;
         obj.visible = false;
         (obj as any).isCollected = true;
-        
         this.updateCoinCounter();
         this.playSound('coin');
         break;
-        
+
       case 'bomb':
         this.createExplosion(objPos);
         this.playSound('bomb');
         if (this.player) {
           this.player.playFall(() => {
-            // 🔥 Воспроизводим звук проигрыша перед завершением игры
             this.playSound('lose');
             this.endGame(false);
             this.stopBackgroundMusic();
@@ -1238,32 +873,20 @@ export class Game {
         }
         this.world?.removeObject(obj);
         break;
-        
+
       case 'gate':
         const gate = (obj as any).gate as Gate;
-        if (!gate || gate.isPassed()) {
-          return;
-        }
-        
+        if (!gate || gate.isPassed()) return;
         const playerPos = this.player?.getPosition() || new THREE.Vector3();
         const side = playerPos.x < 0 ? 'left' : 'right';
         const modifier = gate.getModifier(side);
-        
         if (modifier) {
           switch (modifier.type) {
-            case '+':
-              this.score += modifier.value;
-              break;
-            case '-':
-              this.score = Math.max(0, this.score - modifier.value);
-              break;
-            case 'x':
-              this.score *= modifier.value;
-              break;
+            case '+': this.score += modifier.value; break;
+            case '-': this.score = Math.max(0, this.score - modifier.value); break;
+            case 'x': this.score *= modifier.value; break;
           }
-          
           this.updateCoinCounter();
-          console.log('🚪 Проход через ворота, играем звук gate');
           this.playSound('gate');
           gate.markAsPassed();
         }
@@ -1271,66 +894,23 @@ export class Game {
     }
   }
 
-  private playSound(name: string): void {
+  private async playSound(name: string): Promise<void> {
     try {
-      const cachedAudio = this.soundCache.get(name);
-      if (cachedAudio) {
-        const clone = cachedAudio.cloneNode() as HTMLAudioElement;
-        // Устанавливаем громкость в зависимости от типа звука
-        if (name.startsWith('step')) {
-          clone.volume = 0.25;
-        } else if (name === 'bomb') {
-          clone.volume = 0.6;
-        } else if (name === 'gate') {
-          clone.volume = 1.0; // 🔥 МАКСИМАЛЬНАЯ ГРОМКОСТЬ ВОРОТ
-        } else if (name === 'lose') {
-          clone.volume = 0.7;
-        } else if (name === 'win') {
-          clone.volume = 0.8; // 🏆 Звук победы
-        } else {
-          clone.volume = 0.5;
+      let audio = this.soundCache.get(name);
+
+      if (!audio) {
+        const loader = this.SOUND_LOADERS[name];
+        if (!loader) {
+          console.warn(`⚠️ Звук "${name}" не найден`);
+          return;
         }
-        console.log(`🔊 Воспроизвожу звук: ${name} (громкость: ${clone.volume})`);
-        clone.play().catch((err) => {
-          console.warn(`⚠️ Ошибка воспроизведения ${name}:`, err);
-        });
-      } else {
-        console.warn(`⚠️ Звук ${name} не найден в кэше, пробуем загрузить`);
-        // Пробуем загрузить .mp3 или .wav
-        const audio = new Audio(`./sounds/${name}.mp3`);
-        audio.onerror = () => {
-          // Если .mp3 не загрузился, пробуем .wav
-          console.log(`🔄 Пробуем загрузить ${name}.wav`);
-          const wavAudio = new Audio(`./sounds/${name}.wav`);
-          let volume = 0.5;
-          if (name.startsWith('step')) volume = 0.25;
-          else if (name === 'bomb') volume = 0.6;
-          else if (name === 'gate') volume = 1.0; // 🔥 МАКСИМАЛЬНАЯ ГРОМКОСТЬ
-          else if (name === 'lose') volume = 0.7;
-          else if (name === 'win') volume = 0.8; // 🏆 Звук победы
-          wavAudio.volume = volume;
-          console.log(`🔊 Воспроизвожу звук: ${name}.wav (громкость: ${volume})`);
-          wavAudio.play().catch((err) => {
-            console.warn(`⚠️ Ошибка воспроизведения ${name}.wav:`, err);
-          });
-        };
-        
-        if (name.startsWith('step')) {
-          audio.volume = 0.25;
-        } else if (name === 'bomb') {
-          audio.volume = 0.6;
-        } else if (name === 'gate') {
-          audio.volume = 1.0; // 🔥 МАКСИМАЛЬНАЯ ГРОМКОСТЬ
-        } else if (name === 'lose') {
-          audio.volume = 0.7;
-        } else if (name === 'win') {
-          audio.volume = 0.8; // 🏆 Звук победы
-        } else {
-          audio.volume = 0.5;
-        }
-        console.log(`🔊 Воспроизвожу звук: ${name}.mp3 (громкость: ${audio.volume})`);
-        audio.play().catch(() => {});
+        audio = await AssetLoader.loadSound(name, loader);
+        this.setupAudio(audio, name);
       }
+
+      const clone = audio.cloneNode() as HTMLAudioElement;
+      clone.play().catch(err => console.warn(`⚠️ Ошибка воспроизведения ${name}:`, err));
+
     } catch (err) {
       console.warn(`⚠️ Ошибка в playSound для ${name}:`, err);
     }
@@ -1338,57 +918,30 @@ export class Game {
 
   private endGame(success: boolean): void {
     this.isGameOver = true;
-    this.stopBackgroundMusic(); // 🔥 Останавливаем музыку в любом случае
+    this.stopBackgroundMusic();
+
     if (success && this.player) {
       this.player.faceCamera();
     }
+
     setTimeout(() => this.showEndCard(), success ? 1500 : 500);
   }
 
   private showEndCard(): void {
     const overlay = document.createElement('div');
-    overlay.style.cssText = `
-      position: fixed; top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: linear-gradient(135deg, #1a1a2e, #16213e);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      color: white; font-family: sans-serif;
-      z-index: 2000;
-    `;
+    overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #1a1a2e, #16213e); display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: sans-serif; z-index: 2000;`;
     overlay.innerHTML = `
       <h1 style="font-size: 48px; margin: 0 0 10px;">${this.isFinished ? '🏆 ПОБЕДА! 🏆' : (this.score >= 10 ? '🎉' : '💀')} ${this.score} монет!</h1>
       <p style="font-size: 20px; opacity: 0.8; margin-bottom: 30px;">${this.isFinished ? 'Ты добрался до финиша!' : (this.score >= 10 ? 'Отличный результат!' : 'Попробуй ещё раз!')}</p>
-      <button id="cta" style="
-        padding: 20px 60px;
-        font-size: 24px;
-        font-weight: bold;
-        background: linear-gradient(135deg, #4ecca3, #38b28a);
-        border: none;
-        border-radius: 50px;
-        color: white;
-        cursor: pointer;
-        box-shadow: 0 10px 30px rgba(78, 204, 163, 0.4);
-        transition: transform 0.2s;
-        margin: 10px;
-      ">🚀 Установить игру</button>
-      <button id="retry" style="
-        padding: 15px 40px;
-        font-size: 18px;
-        background: transparent;
-        border: 2px solid rgba(255,255,255,0.3);
-        border-radius: 30px;
-        color: white;
-        cursor: pointer;
-        margin: 10px;
-      ">🔄 Сыграть ещё</button>
+      <button id="cta" style="padding: 20px 60px; font-size: 24px; font-weight: bold; background: linear-gradient(135deg, #4ecca3, #38b28a); border: none; border-radius: 50px; color: white; cursor: pointer; box-shadow: 0 10px 30px rgba(78, 204, 163, 0.4); transition: transform 0.2s; margin: 10px;">🚀 Установить игру</button>
+      <button id="retry" style="padding: 15px 40px; font-size: 18px; background: transparent; border: 2px solid rgba(255,255,255,0.3); border-radius: 30px; color: white; cursor: pointer; margin: 10px;">🔄 Сыграть ещё</button>
     `;
     document.body.appendChild(overlay);
-    
+
     document.getElementById('cta')?.addEventListener('click', () => {
       alert('🚀 Переход к установке...');
     });
-    
+
     document.getElementById('retry')?.addEventListener('click', () => {
       location.reload();
     });
