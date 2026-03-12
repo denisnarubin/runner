@@ -3,1138 +3,1270 @@ import { World } from './World';
 import { Player } from './Player';
 import { Gate } from './Gate';
 import { AssetLoader } from './AssetLoader';
-
 // 🔥 ЗВУКИ — ленивая загрузка через dynamic import
 // 🔥 ТЕКСТУРЫ — статический импорт (маленький размер)
 import coinTextureUrl from '../assets/textures/coin.png?url';
+import handTextureUrl from '../assets/textures/hand.png?url';
 import soundOnUrl from '../assets/textures/sound_on_coffee.png?url';
 import soundOffUrl from '../assets/textures/sound_off_coffee.png?url';
 
 export class Game {
-  private scene: THREE.Scene;
-  private camera: THREE.PerspectiveCamera;
-  private renderer: THREE.WebGLRenderer;
-  private world: World | null = null;
-  private player: Player | null = null;
-  private characterLight: THREE.PointLight | null = null;
-  private clock = new THREE.Clock();
-  private score = 0;
-  private isGameOver = false;
-  private isTutorialVisible = true;
-  private isFinished = false;
-  private finishLineZ = 200;
-  private activeEffects: Array<{ update(delta: number): boolean }> = [];
-  private readonly CAM_OFFSET_X = 0;
-  private readonly CAM_OFFSET_Y = 4.5;
-  private readonly CAM_OFFSET_Z = -8;
-  private readonly CAM_LOOKAHEAD = 10;
-  private readonly CAM_SMOOTH = 0.1;
-  private tempVector = new THREE.Vector3();
-  private coinCounterElement: HTMLElement | null = null;
-  private coinIconElement: HTMLElement | null = null;
-  private coinContainer: HTMLElement | null = null;
-  
-  private soundCache: Map<string, HTMLAudioElement> = new Map();
-  private stepIndex = 0;
-  private stepTimer = 0;
-  private readonly STEP_INTERVAL = 0.4;
-  private backgroundMusic: HTMLAudioElement | null = null;
-  private musicStarted = false;
-  private isMusicMuted = false;
-  private musicButton: HTMLImageElement | null = null;
+    private scene: THREE.Scene;
+    private camera: THREE.PerspectiveCamera;
+    private renderer: THREE.WebGLRenderer;
+    private world: World | null = null;
+    private player: Player | null = null;
+    private characterLight: THREE.PointLight | null = null;
+    private clock = new THREE.Clock();
+    private score = 0;
+    private isGameOver = false;
+    private isTutorialVisible = true;
+    private isFinished = false;
+    private finishLineZ = 200;
+    private activeEffects: Array<{ update(delta: number): boolean }> = [];
+    private readonly CAM_OFFSET_X = 0;
+    private readonly CAM_OFFSET_Y = 4.5;
+    private readonly CAM_OFFSET_Z = -8;
+    private readonly CAM_LOOKAHEAD = 10;
+    private readonly CAM_SMOOTH = 0.1;
+    private tempVector = new THREE.Vector3();
+    private coinCounterElement: HTMLElement | null = null;
+    private coinIconElement: HTMLElement | null = null;
+    private coinContainer: HTMLElement | null = null;
+    private soundCache: Map<string, HTMLAudioElement> = new Map();
+    private stepIndex = 0;
+    private stepTimer = 0;
+    private readonly STEP_INTERVAL = 0.4;
+    private backgroundMusic: HTMLAudioElement | null = null;
+    private musicStarted = false;
+    private isMusicMuted = false;
+    private musicButton: HTMLImageElement | null = null;
+    // 🔥 Флаг: музыка запущена через взаимодействие (чтобы не запускать дважды)
+    private musicTriggeredByInteraction = false;
+    // 🔥 Свойства для руки-подсказки (PNG)
+    private swipeHandContainer: HTMLElement | null = null;
+    private swipeHandElement: HTMLImageElement | null = null;
+    private lastMoveTime: number = 0;
+    private readonly HAND_SHOW_DELAY = 2000;
+    private handAnimationId: number | null = null;
+    private handPosition = 0;
 
-  // 🔥 Маппинг звуков на функции-загрузчики
-  private readonly SOUND_LOADERS: Record<string, () => Promise<string>> = {
-    'coin': () => import('../assets/sounds/coin.ogg?url').then(m => m.default),
-    'bomb': () => import('../assets/sounds/bomb.ogg?url').then(m => m.default),
-    'gate': () => import('../assets/sounds/gate.ogg?url').then(m => m.default),
-    'lose': () => import('../assets/sounds/STGR_Fail_Lose_forMUSIC_A_1.ogg?url').then(m => m.default),
-    'win': () => import('../assets/sounds/win.ogg?url').then(m => m.default),
-    'step_0': () => import('../assets/sounds/step_0.ogg?url').then(m => m.default),
-    'step_1': () => import('../assets/sounds/step_1.ogg?url').then(m => m.default),
-    'step_2': () => import('../assets/sounds/step_2.ogg?url').then(m => m.default),
-  };
-
-  constructor(canvas: HTMLCanvasElement) {
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x87ceeb);
-    this.scene.fog = new THREE.Fog(0x87ceeb, 20, 80);
-    
-    this.camera = new THREE.PerspectiveCamera(
-      45,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      1000
-    );
-    this.camera.position.set(this.CAM_OFFSET_X, this.CAM_OFFSET_Y, this.CAM_OFFSET_Z);
-    this.camera.lookAt(0, 1.5, this.CAM_LOOKAHEAD);
-
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
-    this.scene.add(ambientLight);
-
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
-    dirLight.position.set(15, 25, 10);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.set(2048, 2048);
-    dirLight.shadow.camera.near = 0.5;
-    dirLight.shadow.camera.far = 100;
-    dirLight.shadow.camera.left = -20;
-    dirLight.shadow.camera.right = 20;
-    dirLight.shadow.camera.top = 20;
-    dirLight.shadow.camera.bottom = -20;
-    this.scene.add(dirLight);
-
-    this.characterLight = new THREE.PointLight(0xffffff, 0.8, 30);
-    this.characterLight.position.set(0, 5, 0);
-    this.characterLight.castShadow = false;
-    this.scene.add(this.characterLight);
-
-    const fillLight = new THREE.PointLight(0xffffff, 0.4);
-    fillLight.position.set(5, 10, 5);
-    this.scene.add(fillLight);
-
-    this.world = new World(this.scene);
-    this.player = new Player();
-    this.scene.add(this.player.getMesh());
-
-    this.createFinishLine();
-    this.showTutorial();
-    this.setupControls();
-    this.createCoinCounter();
-    this.createMusicControls();
-    
-    window.addEventListener('resize', () => {
-      this.updateCoinCounterStyles();
-      this.updateMusicButtonStyles();
-    });
-    
-    this.preloadCriticalSounds();
-  }
-
-  private preloadCriticalSounds(): void {
-    const critical = ['step_0', 'step_1', 'step_2'];
-    critical.forEach(name => {
-      const loader = this.SOUND_LOADERS[name];
-      if (loader) {
-        AssetLoader.loadSound(name, loader).then(audio => {
-          this.setupAudio(audio, name);
-        }).catch(err => {
-          console.warn(`⚠️ Не удалось предзагрузить звук "${name}"`, err);
-        });
-      }
-    });
-    this.loadBackgroundMusic();
-  }
-
-  private async loadBackgroundMusic(): Promise<void> {
-    try {
-      const url = await import('../assets/sounds/music_halloween party [loop].ogg?url').then(m => m.default);
-      const music = new Audio(url);
-      music.loop = true;
-      music.volume = 0.3;
-      music.oncanplaythrough = () => {
-        console.log('✅ Музыка готова');
-      };
-      this.backgroundMusic = music;
-    } catch (e) {
-      console.warn('⚠️ Не удалось предзагрузить музыку:', e);
-    }
-  }
-
-  private setupAudio(audio: HTMLAudioElement, name: string): void {
-    if (name.startsWith('step')) audio.volume = 0.25;
-    else if (name === 'bomb') audio.volume = 0.6;
-    else if (name === 'gate') audio.volume = 1.0;
-    else if (name === 'lose') audio.volume = 0.7;
-    else if (name === 'win') audio.volume = 0.8;
-    else audio.volume = 0.5;
-    
-    this.soundCache.set(name, audio);
-  }
-
-  private playBackgroundMusic(): void {
-    if (this.backgroundMusic && !this.musicStarted && !this.isMusicMuted) {
-      this.backgroundMusic.play()
-        .then(() => { this.musicStarted = true; })
-        .catch((err) => { console.warn('⚠️ Не удалось запустить музыку:', err); });
-    }
-  }
-
-  private stopBackgroundMusic(): void {
-    if (this.backgroundMusic && this.musicStarted) {
-      this.backgroundMusic.pause();
-      this.backgroundMusic.currentTime = 0;
-      this.musicStarted = false;
-    }
-  }
-
-  private toggleMusic(): void {
-    this.isMusicMuted = !this.isMusicMuted;
-    
-    if (this.backgroundMusic) {
-      if (this.isMusicMuted) {
-        this.backgroundMusic.pause();
-        this.musicStarted = false;
-      } else {
-        this.backgroundMusic.play()
-          .then(() => { this.musicStarted = true; })
-          .catch(err => console.warn('⚠️ Не удалось возобновить музыку:', err));
-      }
-    }
-    
-    this.updateMusicButtonIcon();
-  }
-
-  private updateMusicButtonIcon(): void {
-    if (!this.musicButton) return;
-    
-    // Прямое обновление src у изображения
-    this.musicButton.src = this.isMusicMuted ? soundOffUrl : soundOnUrl;
-    this.musicButton.alt = this.isMusicMuted ? 'sound off' : 'sound on';
-  }
-
-  private createMusicControls(): void {
-    const container = document.createElement('div');
-    container.id = 'music-controls';
-    document.body.appendChild(container);
-
-    const img = document.createElement('img');
-    img.src = soundOnUrl;
-    img.alt = 'sound on';
-    img.draggable = false;
-    img.style.cssText = `
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: block;
-      cursor: pointer;
-      filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
-      transition: all 0.2s ease;
-    `;
-
-    container.appendChild(img);
-    this.musicButton = img;
-
-    // Добавляем обработчик клика
-    container.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.toggleMusic();
-    });
-
-    // Добавляем hover эффекты
-    img.addEventListener('mouseenter', () => {
-      img.style.transform = 'scale(1.1)';
-      img.style.filter = 'drop-shadow(0 6px 12px rgba(0, 0, 0, 0.4))';
-    });
-
-    img.addEventListener('mouseleave', () => {
-      img.style.transform = 'scale(1)';
-      img.style.filter = 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))';
-    });
-
-    // Добавляем touch эффекты для мобильных
-    img.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      img.style.transform = 'scale(0.95)';
-    });
-
-    img.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      img.style.transform = 'scale(1)';
-    });
-
-    // Обновляем размеры при изменении окна
-    this.updateMusicButtonStyles();
-  }
-
-  private updateMusicButtonStyles(): void {
-    const container = document.getElementById('music-controls');
-    if (!container || !this.musicButton) return;
-
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    
-    // Адаптивные размеры на основе ширины экрана и ориентации
-    let buttonSize: number;
-    let bottomOffset: number;
-    let leftOffset: number;
-
-    if (width >= 1920) {
-      buttonSize = 70;
-      bottomOffset = 35;
-      leftOffset = 35;
-    } else if (width >= 1440) {
-      buttonSize = 60;
-      bottomOffset = 30;
-      leftOffset = 30;
-    } else if (width >= 1024) {
-      buttonSize = 55;
-      bottomOffset = 25;
-      leftOffset = 25;
-    } else if (width >= 768) {
-      buttonSize = 50;
-      bottomOffset = 20;
-      leftOffset = 20;
-    } else if (width >= 576) {
-      buttonSize = 45;
-      bottomOffset = 15;
-      leftOffset = 15;
-    } else if (width >= 425) {
-      buttonSize = 40;
-      bottomOffset = 12;
-      leftOffset = 12;
-    } else {
-      buttonSize = 35;
-      bottomOffset = 10;
-      leftOffset = 10;
-    }
-
-    // Для мобильных устройств в ландшафтной ориентации
-    if (height < 500 && width > height) {
-      buttonSize = Math.min(buttonSize, 40);
-      bottomOffset = 8;
-      leftOffset = 8;
-    }
-
-    container.style.cssText = `
-      position: fixed;
-      left: ${leftOffset}px;
-      bottom: ${bottomOffset}px;
-      width: ${buttonSize}px;
-      height: ${buttonSize}px;
-      z-index: 1000;
-      cursor: pointer;
-      transition: all 0.3s ease;
-    `;
-
-    // Обновляем стили изображения
-    const img = this.musicButton as HTMLImageElement;
-    img.style.cssText = `
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: block;
-      cursor: pointer;
-      filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
-      transition: all 0.2s ease;
-    `;
-  }
-
-  private playStepSound(): void {
-    if (!this.player || this.isGameOver || this.isFinished) return;
-    const stepName = `step_${this.stepIndex}`;
-    this.playSound(stepName);
-    this.stepIndex = (this.stepIndex + 1) % 3;
-  }
-
-  private createCoinCounter(): void {
-    const container = document.createElement('div');
-    container.id = 'coin-counter-container';
-    document.body.appendChild(container);
-
-    const coinIcon = document.createElement('img');
-    coinIcon.src = coinTextureUrl;
-    coinIcon.alt = 'coin';
-    coinIcon.id = 'coin-icon';
-    coinIcon.draggable = false;
-    coinIcon.onerror = () => {
-      const fallbackSpan = document.createElement('span');
-      fallbackSpan.innerHTML = '🪙';
-      fallbackSpan.id = 'coin-icon-fallback';
-      fallbackSpan.style.cssText = `font-size: inherit; line-height: 1; display: inline-block;`;
-      coinIcon.replaceWith(fallbackSpan);
-      this.coinIconElement = fallbackSpan;
+    private readonly SOUND_LOADERS: Record<string, () => Promise<string>> = {
+        'coin': () => import('../assets/sounds/coin.ogg?url').then(m => m.default),
+        'bomb': () => import('../assets/sounds/bomb.ogg?url').then(m => m.default),
+        'gate': () => import('../assets/sounds/gate.ogg?url').then(m => m.default),
+        'lose': () => import('../assets/sounds/STGR_Fail_Lose_forMUSIC_A_1.ogg?url').then(m => m.default),
+        'win': () => import('../assets/sounds/win.ogg?url').then(m => m.default),
+        'step_0': () => import('../assets/sounds/step_0.ogg?url').then(m => m.default),
+        'step_1': () => import('../assets/sounds/step_1.ogg?url').then(m => m.default),
+        'step_2': () => import('../assets/sounds/step_2.ogg?url').then(m => m.default),
     };
 
-    const countText = document.createElement('span');
-    countText.id = 'coinCount';
-    countText.textContent = `x${this.score}`;
+    constructor(canvas: HTMLCanvasElement) {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x87ceeb);
+        this.scene.fog = new THREE.Fog(0x87ceeb, 20, 80);
 
-    container.appendChild(coinIcon);
-    container.appendChild(countText);
+        this.camera = new THREE.PerspectiveCamera(
+            45,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+        );
+        this.camera.position.set(this.CAM_OFFSET_X, this.CAM_OFFSET_Y, this.CAM_OFFSET_Z);
+        this.camera.lookAt(0, 1.5, this.CAM_LOOKAHEAD);
 
-    this.coinContainer = container;
-    this.coinCounterElement = countText;
-    this.coinIconElement = coinIcon;
-    this.updateCoinCounterStyles();
-  }
+        this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-  private updateCoinCounterStyles(): void {
-    if (!this.coinContainer) return;
-    const width = window.innerWidth;
-    
-    let containerStyles = `position: fixed; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: flex-end; background: linear-gradient(135deg, #ff6b6b, #ff8e8e); box-shadow: 0 4px 14px rgba(255, 107, 107, 0.5); z-index: 100; font-family: 'Arial', sans-serif; pointer-events: none; overflow: visible; border: 2px solid rgba(255, 255, 255, 0.22); transition: all 0.3s ease;`;
-    let iconStyles = `object-fit: contain; filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55)); z-index: 101; position: relative; transition: all 0.3s ease;`;
-    let textStyles = `color: #ffd700; font-weight: bold; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5); text-align: center; letter-spacing: 1.5px; line-height: 1; transition: all 0.3s ease;`;
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+        this.scene.add(ambientLight);
 
-    if (width >= 1920) {
-      containerStyles += `top: 45px; padding: 6px 28px 6px 0; height: 44px; min-width: 160px; border-radius: 24px;`;
-      iconStyles += `width: 76px; height: 76px; margin-left: -86px; margin-right: -22px; margin-top: -24px; margin-bottom: -24px; left: -28px; transform: scale(1.06);`;
-      textStyles += `font-size: 30px; min-width: 80px; margin-right: 6px;`;
-    } else if (width >= 1440) {
-      containerStyles += `top: 25px; padding: 3px 18px 3px 0; height: 30px; min-width: 110px; border-radius: 16px;`;
-      iconStyles += `width: 52px; height: 52px; margin-left: -62px; margin-right: -14px; margin-top: -16px; margin-bottom: -16px; left: -19px; transform: scale(1.02);`;
-      textStyles += `font-size: 20px; min-width: 55px; margin-right: 3px;`;
-    } else if (width >= 1024) {
-      containerStyles += `top: 20px; padding: 3px 16px 3px 0; height: 28px; min-width: 100px; border-radius: 15px;`;
-      iconStyles += `width: 48px; height: 48px; margin-left: -56px; margin-right: -12px; margin-top: -14px; margin-bottom: -14px; left: -17px; transform: scale(1.02);`;
-      textStyles += `font-size: 18px; min-width: 50px; margin-right: 3px;`;
-    } else if (width >= 768) {
-      containerStyles += `top: 18px; padding: 2px 14px 2px 0; height: 26px; min-width: 90px; border-radius: 14px;`;
-      iconStyles += `width: 44px; height: 44px; margin-left: -50px; margin-right: -10px; margin-top: -12px; margin-bottom: -12px; left: -15px; transform: scale(1.01);`;
-      textStyles += `font-size: 16px; min-width: 45px; margin-right: 2px;`;
-    } else if (width >= 576) {
-      containerStyles += `top: 16px; padding: 2px 12px 2px 0; height: 24px; min-width: 80px; border-radius: 12px;`;
-      iconStyles += `width: 40px; height: 40px; margin-left: -46px; margin-right: -8px; margin-top: -10px; margin-bottom: -10px; left: -13px; transform: scale(1);`;
-      textStyles += `font-size: 15px; min-width: 40px; margin-right: 2px;`;
-    } else if (width >= 425) {
-      containerStyles += `top: 14px; padding: 2px 10px 2px 0; height: 22px; min-width: 70px; border-radius: 11px;`;
-      iconStyles += `width: 36px; height: 36px; margin-left: -42px; margin-right: -6px; margin-top: -9px; margin-bottom: -9px; left: -11px; transform: scale(0.99);`;
-      textStyles += `font-size: 14px; min-width: 35px; margin-right: 2px;`;
-    } else {
-      containerStyles += `top: 12px; padding: 2px 8px 2px 0; height: 20px; min-width: 60px; border-radius: 10px;`;
-      iconStyles += `width: 32px; height: 32px; margin-left: -38px; margin-right: -4px; margin-top: -8px; margin-bottom: -8px; left: -9px; transform: scale(0.98);`;
-      textStyles += `font-size: 13px; min-width: 30px; margin-right: 2px;`;
-    }
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
+        dirLight.position.set(15, 25, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.set(2048, 2048);
+        dirLight.shadow.camera.near = 0.5;
+        dirLight.shadow.camera.far = 100;
+        dirLight.shadow.camera.left = -20;
+        dirLight.shadow.camera.right = 20;
+        dirLight.shadow.camera.top = 20;
+        dirLight.shadow.camera.bottom = -20;
+        this.scene.add(dirLight);
 
-    this.coinContainer.style.cssText = containerStyles;
-    
-    const icon = this.coinIconElement;
-    if (icon && icon.tagName === 'IMG') {
-      (icon as HTMLImageElement).style.cssText = iconStyles;
-    } else if (icon && (icon as HTMLElement).id === 'coin-icon-fallback') {
-      let emojiSize = width >= 1920 ? '76px' : width >= 1440 ? '52px' : width >= 1024 ? '48px' : width >= 768 ? '44px' : width >= 576 ? '40px' : width >= 425 ? '36px' : '32px';
-      let emojiLeft = width >= 1920 ? '-28px' : width >= 1440 ? '-19px' : width >= 1024 ? '-17px' : width >= 768 ? '-15px' : width >= 576 ? '-13px' : width >= 425 ? '-11px' : '-9px';
-      icon.style.cssText = `font-size: ${emojiSize}; filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55)); z-index: 101; position: relative; left: ${emojiLeft}; transition: all 0.3s ease; line-height: 1; display: inline-block;`;
-    }
+        this.characterLight = new THREE.PointLight(0xffffff, 0.8, 30);
+        this.characterLight.position.set(0, 5, 0);
+        this.characterLight.castShadow = false;
+        this.scene.add(this.characterLight);
 
-    if (this.coinCounterElement) {
-      this.coinCounterElement.style.cssText = textStyles;
-    }
-  }
+        const fillLight = new THREE.PointLight(0xffffff, 0.4);
+        fillLight.position.set(5, 10, 5);
+        this.scene.add(fillLight);
 
-  private updateCoinCounter(): void {
-    if (this.coinCounterElement) {
-      this.coinCounterElement.textContent = `x${this.score}`;
-    }
-  }
+        this.world = new World(this.scene);
+        this.player = new Player();
+        this.scene.add(this.player.getMesh());
 
-  private createFinishLine(): void {
-    const finishGroup = new THREE.Group();
-    const tileSize = 0.5;
-    const tilesX = 12;
-    const tilesZ = 8;
-    const totalWidth = tilesX * tileSize;
-    const totalLength = tilesZ * tileSize;
+        this.createFinishLine();
+        this.showTutorial();
+        this.setupControls();
+        this.createCoinCounter();
+        this.createMusicControls();
 
-    for (let i = 0; i < tilesX; i++) {
-      for (let j = 0; j < tilesZ; j++) {
-        const isBlack = (i + j) % 2 === 0;
-        const color = isBlack ? 0x000000 : 0xffffff;
-        const emissiveColor = isBlack ? 0x111111 : 0x444444;
-
-        const material = new THREE.MeshStandardMaterial({
-          color: color,
-          emissive: emissiveColor,
-          emissiveIntensity: 0.2,
-          roughness: 0.4,
-          metalness: 0.1
+        window.addEventListener('resize', () => {
+            this.updateCoinCounterStyles();
+            this.updateMusicButtonStyles();
+            this.updateSwipeHandStyles();
         });
 
-        const geometry = new THREE.BoxGeometry(tileSize - 0.02, 0.05, tileSize - 0.02);
-        const tile = new THREE.Mesh(geometry, material);
-        const xPos = -totalWidth/2 + i * tileSize + tileSize/2;
-        const zPos = this.finishLineZ - totalLength/2 + j * tileSize + tileSize/2;
-        tile.position.set(xPos, 0.02, zPos);
-        tile.receiveShadow = true;
-        tile.castShadow = false;
-        finishGroup.add(tile);
-      }
-    }
-    this.scene.add(finishGroup);
-  }
-
-  private createExplosion(position: THREE.Vector3): void {
-    this.createFlashLight(position);
-    this.createExplosionCore(position);
-    this.createSparksAndDebris(position);
-    this.createFireball(position);
-    this.createSmoke(position);
-    setTimeout(() => { this.createShockwave(position); }, 300);
-  }
-
-  private createFlashLight(position: THREE.Vector3): void {
-    const light = new THREE.PointLight(0xff6600, 5, 15);
-    light.position.copy(position);
-    this.scene.add(light);
-    
-    let life = 0;
-    const maxLife = 0.3;
-    const effect = {
-      update: (delta: number): boolean => {
-        life += delta;
-        const progress = life / maxLife;
-        light.intensity = 5 * (1 - progress);
-        if (life >= maxLife) {
-          this.scene.remove(light);
-          light.dispose();
-          return true;
-        }
-        return false;
-      }
-    };
-    this.activeEffects.push(effect);
-  }
-
-  private createExplosionCore(position: THREE.Vector3): void {
-    const particleCount = 60;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    const colors = new Float32Array(particleCount * 3);
-
-    for (let i = 0; i < particleCount; i++) {
-      positions[i*3] = position.x;
-      positions[i*3+1] = position.y;
-      positions[i*3+2] = position.z;
-      colors[i*3] = 1.0;
-      colors[i*3+1] = 0.6 + Math.random() * 0.4;
-      colors[i*3+2] = 0.1 + Math.random() * 0.2;
+        this.preloadCriticalSounds();
     }
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    const material = new THREE.PointsMaterial({
-      size: 0.4,
-      vertexColors: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      transparent: true,
-      opacity: 1.0,
-      sizeAttenuation: true
-    });
-
-    const particles = new THREE.Points(geometry, material);
-    this.scene.add(particles);
-
-    const velocities: THREE.Vector3[] = [];
-    for (let i = 0; i < particleCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      const speed = 8 + Math.random() * 8;
-      velocities.push(new THREE.Vector3(
-        Math.sin(phi) * Math.cos(theta) * speed,
-        Math.sin(phi) * Math.sin(theta) * speed,
-        Math.cos(phi) * speed
-      ));
+    private preloadCriticalSounds(): void {
+        const critical = ['step_0', 'step_1', 'step_2'];
+        critical.forEach(name => {
+            const loader = this.SOUND_LOADERS[name];
+            if (loader) {
+                AssetLoader.loadSound(name, loader).then(audio => {
+                    this.setupAudio(audio, name);
+                }).catch(err => {
+                    console.warn(`⚠️ Не удалось предзагрузить звук "${name}"`, err);
+                });
+            }
+        });
+        this.loadBackgroundMusic();
     }
 
-    let life = 0;
-    const maxLife = 0.8;
-    const effect = {
-      update: (delta: number): boolean => {
-        life += delta;
-        const progress = life / maxLife;
-        const posAttr = geometry.attributes.position;
-        const posArray = posAttr.array as Float32Array;
-        for (let i = 0; i < particleCount; i++) {
-          posArray[i*3] = position.x + velocities[i].x * progress * 2;
-          posArray[i*3+1] = position.y + velocities[i].y * progress * 2;
-          posArray[i*3+2] = position.z + velocities[i].z * progress * 2;
+    private async loadBackgroundMusic(): Promise<void> {
+        try {
+            const url = await import('../assets/sounds/music_halloween party [loop].ogg?url').then(m => m.default);
+            const music = new Audio(url);
+            music.loop = true;
+            music.volume = 0.3;
+            music.oncanplaythrough = () => {
+                console.log('✅ Музыка готова');
+            };
+            this.backgroundMusic = music;
+        } catch (e) {
+            console.warn('⚠️ Не удалось предзагрузить музыку:', e);
         }
-        posAttr.needsUpdate = true;
-        material.opacity = 1 - progress * 1.5;
-        material.size = 0.4 * (1 - progress * 0.5);
-        if (life >= maxLife) {
-          this.scene.remove(particles);
-          geometry.dispose();
-          material.dispose();
-          return true;
-        }
-        return false;
-      }
-    };
-    this.activeEffects.push(effect);
-  }
-
-  private createFireball(position: THREE.Vector3): void {
-    const particleCount = 30;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-
-    for (let i = 0; i < particleCount; i++) {
-      positions[i*3] = position.x;
-      positions[i*3+1] = position.y;
-      positions[i*3+2] = position.z;
     }
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 32;
-    canvas.height = 32;
-    const ctx = canvas.getContext('2d')!;
-    const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
-    gradient.addColorStop(0, 'rgba(255,255,255,1)');
-    gradient.addColorStop(0.4, 'rgba(255,200,100,1)');
-    gradient.addColorStop(0.7, 'rgba(255,100,0,0.8)');
-    gradient.addColorStop(1, 'rgba(255,0,0,0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 32, 32);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.PointsMaterial({
-      size: 1.5,
-      map: texture,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      transparent: true,
-      opacity: 0.9,
-      sizeAttenuation: true,
-      color: 0xffaa33
-    });
-
-    const particles = new THREE.Points(geometry, material);
-    this.scene.add(particles);
-
-    const velocities: THREE.Vector3[] = [];
-    for (let i = 0; i < particleCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      const speed = 2 + Math.random() * 3;
-      velocities.push(new THREE.Vector3(
-        Math.sin(phi) * Math.cos(theta) * speed,
-        Math.sin(phi) * Math.sin(theta) * speed * 0.5,
-        Math.cos(phi) * speed
-      ));
+    private setupAudio(audio: HTMLAudioElement, name: string): void {
+        if (name.startsWith('step')) audio.volume = 0.25;
+        else if (name === 'bomb') audio.volume = 0.6;
+        else if (name === 'gate') audio.volume = 1.0;
+        else if (name === 'lose') audio.volume = 0.7;
+        else if (name === 'win') audio.volume = 0.8;
+        else audio.volume = 0.5;
+        this.soundCache.set(name, audio);
     }
 
-    let life = 0;
-    const maxLife = 1.5;
-    const effect = {
-      update: (delta: number): boolean => {
-        life += delta;
-        const progress = life / maxLife;
-        const posAttr = geometry.attributes.position;
-        const posArray = posAttr.array as Float32Array;
-        for (let i = 0; i < particleCount; i++) {
-          posArray[i*3] = position.x + velocities[i].x * life * 1.5;
-          posArray[i*3+1] = position.y + 0.5 + velocities[i].y * life * 1.2;
-          posArray[i*3+2] = position.z + velocities[i].z * life * 1.5;
+    // 🔥 ИЗМЕНЕНО: добавлена проверка musicTriggeredByInteraction
+    private playBackgroundMusic(): void {
+        if (this.backgroundMusic && !this.musicStarted && !this.isMusicMuted && !this.musicTriggeredByInteraction) {
+            this.backgroundMusic.play()
+                .then(() => {
+                    this.musicStarted = true;
+                    this.musicTriggeredByInteraction = true; // 🔥 Помечаем, что музыка запущена через взаимодействие
+                })
+                .catch((err) => { console.warn('⚠️ Не удалось запустить музыку:', err); });
         }
-        posAttr.needsUpdate = true;
-        material.opacity = 0.9 * (1 - progress * 0.8);
-        material.size = 1.5 * (1 + progress);
-        if (life >= maxLife) {
-          this.scene.remove(particles);
-          geometry.dispose();
-          material.dispose();
-          texture.dispose();
-          return true;
-        }
-        return false;
-      }
-    };
-    this.activeEffects.push(effect);
-  }
-
-  private createSmoke(position: THREE.Vector3): void {
-    const particleCount = 25;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-
-    for (let i = 0; i < particleCount; i++) {
-      positions[i*3] = position.x;
-      positions[i*3+1] = position.y;
-      positions[i*3+2] = position.z;
     }
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 32;
-    canvas.height = 32;
-    const ctx = canvas.getContext('2d')!;
-    const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
-    gradient.addColorStop(0, 'rgba(100,100,100,0.8)');
-    gradient.addColorStop(0.5, 'rgba(80,80,80,0.5)');
-    gradient.addColorStop(1, 'rgba(50,50,50,0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 32, 32);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.PointsMaterial({
-      size: 2.0,
-      map: texture,
-      blending: THREE.NormalBlending,
-      depthWrite: false,
-      transparent: true,
-      opacity: 0.6,
-      sizeAttenuation: true,
-      color: 0x888888
-    });
-
-    const particles = new THREE.Points(geometry, material);
-    this.scene.add(particles);
-
-    const velocities: THREE.Vector3[] = [];
-    for (let i = 0; i < particleCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const speed = 1 + Math.random() * 2;
-      velocities.push(new THREE.Vector3(
-        Math.cos(theta) * speed,
-        Math.random() * 2,
-        Math.sin(theta) * speed
-      ));
+    private stopBackgroundMusic(): void {
+        if (this.backgroundMusic && this.musicStarted) {
+            this.backgroundMusic.pause();
+            this.backgroundMusic.currentTime = 0;
+            this.musicStarted = false;
+        }
     }
 
-    let life = 0;
-    const maxLife = 2.2;
-    const effect = {
-      update: (delta: number): boolean => {
-        life += delta;
-        const progress = life / maxLife;
-        const posAttr = geometry.attributes.position;
-        const posArray = posAttr.array as Float32Array;
-        for (let i = 0; i < particleCount; i++) {
-          posArray[i*3] = position.x + velocities[i].x * life * 1.5;
-          posArray[i*3+1] = position.y + 1.0 + velocities[i].y * life * 2;
-          posArray[i*3+2] = position.z + velocities[i].z * life * 1.5;
+    private toggleMusic(): void {
+        this.isMusicMuted = !this.isMusicMuted;
+        if (this.backgroundMusic) {
+            if (this.isMusicMuted) {
+                this.backgroundMusic.pause();
+                this.musicStarted = false;
+            } else {
+                this.backgroundMusic.play()
+                    .then(() => { this.musicStarted = true; })
+                    .catch(err => console.warn('⚠️ Не удалось возобновить музыку:', err));
+            }
         }
-        posAttr.needsUpdate = true;
-        material.opacity = 0.6 * (1 - progress * 0.7);
-        material.size = 2.0 * (1 + progress);
-        if (life >= maxLife) {
-          this.scene.remove(particles);
-          geometry.dispose();
-          material.dispose();
-          texture.dispose();
-          return true;
-        }
-        return false;
-      }
-    };
-    this.activeEffects.push(effect);
-  }
-
-  private createSparksAndDebris(position: THREE.Vector3): void {
-    const particleCount = 50;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    const colors = new Float32Array(particleCount * 3);
-
-    for (let i = 0; i < particleCount; i++) {
-      positions[i*3] = position.x;
-      positions[i*3+1] = position.y;
-      positions[i*3+2] = position.z;
-      colors[i*3] = 0.9 + Math.random() * 0.3;
-      colors[i*3+1] = 0.7 + Math.random() * 0.3;
-      colors[i*3+2] = 0.3 + Math.random() * 0.3;
+        this.updateMusicButtonIcon();
     }
 
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    const material = new THREE.PointsMaterial({
-      size: 0.2,
-      vertexColors: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      transparent: true,
-      opacity: 1.0,
-      sizeAttenuation: true
-    });
-
-    const particles = new THREE.Points(geometry, material);
-    this.scene.add(particles);
-
-    const velocities: THREE.Vector3[] = [];
-    for (let i = 0; i < particleCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      const speed = 5 + Math.random() * 10;
-      velocities.push(new THREE.Vector3(
-        Math.sin(phi) * Math.cos(theta) * speed,
-        Math.sin(phi) * Math.sin(theta) * speed,
-        Math.cos(phi) * speed
-      ));
+    private updateMusicButtonIcon(): void {
+        if (!this.musicButton) return;
+        this.musicButton.src = this.isMusicMuted ? soundOffUrl : soundOnUrl;
+        this.musicButton.alt = this.isMusicMuted ? 'sound off' : 'sound on';
     }
 
-    let life = 0;
-    const maxLife = 1.0;
-    const effect = {
-      update: (delta: number): boolean => {
-        life += delta;
-        const progress = life / maxLife;
-        const posAttr = geometry.attributes.position;
-        const posArray = posAttr.array as Float32Array;
-        for (let i = 0; i < particleCount; i++) {
-          posArray[i*3] = position.x + velocities[i].x * life * 2;
-          posArray[i*3+1] = position.y + velocities[i].y * life * 2;
-          posArray[i*3+2] = position.z + velocities[i].z * life * 2;
-        }
-        posAttr.needsUpdate = true;
-        material.opacity = 1 - progress * 1.5;
-        material.size = 0.2 * (1 - progress * 0.8);
-        if (life >= maxLife) {
-          this.scene.remove(particles);
-          geometry.dispose();
-          material.dispose();
-          return true;
-        }
-        return false;
-      }
-    };
-    this.activeEffects.push(effect);
-  }
+    private createMusicControls(): void {
+        const container = document.createElement('div');
+        container.id = 'music-controls';
+        document.body.appendChild(container);
 
-  private createShockwave(position: THREE.Vector3): void {
-    const segments = 32;
-    const geometry = new THREE.RingGeometry(0.1, 0.5, segments);
-    
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gradient.addColorStop(0, 'rgba(255,255,255,0)');
-    gradient.addColorStop(0.3, 'rgba(255,200,100,0.8)');
-    gradient.addColorStop(0.6, 'rgba(255,100,50,0.4)');
-    gradient.addColorStop(1, 'rgba(255,0,0,0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 64, 64);
+        const img = document.createElement('img');
+        img.src = soundOnUrl;
+        img.alt = 'sound on';
+        img.draggable = false;
+        img.style.cssText = `
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            cursor: pointer;
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+            transition: all 0.2s ease;
+        `;
+        container.appendChild(img);
+        this.musicButton = img;
 
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-      depthWrite: false
-    });
+        container.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleMusic();
+        });
 
-    const ring = new THREE.Mesh(geometry, material);
-    ring.position.copy(position);
-    ring.position.y += 0.5;
-    ring.rotation.x = Math.PI / 2;
-    this.scene.add(ring);
+        img.addEventListener('mouseenter', () => {
+            img.style.transform = 'scale(1.1)';
+            img.style.filter = 'drop-shadow(0 6px 12px rgba(0, 0, 0, 0.4))';
+        });
+        img.addEventListener('mouseleave', () => {
+            img.style.transform = 'scale(1)';
+            img.style.filter = 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))';
+        });
+        img.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            img.style.transform = 'scale(0.95)';
+        });
+        img.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            img.style.transform = 'scale(1)';
+        });
 
-    let life = 0;
-    const maxLife = 0.8;
-    const effect = {
-      update: (delta: number): boolean => {
-        life += delta;
-        const progress = life / maxLife;
-        const scale = 1 + progress * 5;
-        ring.scale.set(scale, scale, scale);
-        ring.material.opacity = 1 - progress;
-        if (life >= maxLife) {
-          this.scene.remove(ring);
-          geometry.dispose();
-          material.dispose();
-          texture.dispose();
-          return true;
-        }
-        return false;
-      }
-    };
-    this.activeEffects.push(effect);
-  }
+        this.updateMusicButtonStyles();
+    }
 
-  private showTutorial(): void {
-    const overlay = document.createElement('div');
-    overlay.id = 'tutorial';
-    overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: sans-serif; z-index: 1000; pointer-events: auto;`;
-    overlay.innerHTML = `
-      <h2 style="font-size: 28px; margin-bottom: 20px;">🎮 Как играть</h2>
-      <p style="font-size: 18px; margin: 10px;">👆 Свайпни <b>влево/вправо</b> для движения</p>
-      <p style="font-size: 18px; margin: 10px;">🪙 Собирай <b>монеты</b></p>
-      <p style="font-size: 18px; margin: 10px;">💣 Избегай <b>бомб</b></p>
-      <p style="font-size: 18px; margin: 10px;">🔷 Проходи сквозь <b>ворота</b> для бонусов!</p>
-      <p style="font-size: 18px; margin: 10px;">🏁 Достигни <b>финиша</b></p>
-      <p style="font-size: 18px; margin: 10px; margin-top: 30px; opacity: 0.8;">Нажми любую клавишу чтобы начать</p>
-    `;
-    document.body.appendChild(overlay);
+    private updateMusicButtonStyles(): void {
+        const container = document.getElementById('music-controls');
+        if (!container || !this.musicButton) return;
 
-    const hide = () => {
-      if (this.isTutorialVisible) {
-        this.isTutorialVisible = false;
-        overlay.remove();
-        this.player?.startRunning();
-        this.playBackgroundMusic();
-      }
-    };
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        let buttonSize: number;
+        let bottomOffset: number;
+        let leftOffset: number;
 
-    overlay.addEventListener('click', hide);
-    overlay.addEventListener('touchstart', hide);
-  }
-
-  private setupControls(): void {
-    let startX = 0;
-    const onStart = (x: number) => { startX = x; };
-    const onEnd = (x: number) => {
-      if (this.isFinished || this.isGameOver) return;
-      const diff = x - startX;
-      if (Math.abs(diff) > 50) {
-        this.player?.startMoving();
-        // ИСПРАВЛЕНО: инвертируем управление для свайпов
-        // Так как камера смотрит сзади, свайп влево должен двигать персонажа вправо на экране
-        if (diff > 0) {
-          console.log('👆 Свайп вправо -> движение влево');
-          this.player?.moveLeft(); // Свайп вправо = движение влево
+        if (width >= 1920) {
+            buttonSize = 70; bottomOffset = 35; leftOffset = 35;
+        } else if (width >= 1440) {
+            buttonSize = 60; bottomOffset = 30; leftOffset = 30;
+        } else if (width >= 1024) {
+            buttonSize = 55; bottomOffset = 25; leftOffset = 25;
+        } else if (width >= 768) {
+            buttonSize = 50; bottomOffset = 20; leftOffset = 20;
+        } else if (width >= 576) {
+            buttonSize = 45; bottomOffset = 15; leftOffset = 15;
+        } else if (width >= 425) {
+            buttonSize = 40; bottomOffset = 12; leftOffset = 12;
         } else {
-          console.log('👆 Свайп влево -> движение вправо');
-          this.player?.moveRight(); // Свайп влево = движение вправо
+            buttonSize = 35; bottomOffset = 10; leftOffset = 10;
         }
-      }
+
+        if (height < 500 && width > height) {
+            buttonSize = Math.min(buttonSize, 40);
+            bottomOffset = 8;
+            leftOffset = 8;
+        }
+
+        container.style.cssText = `
+            position: fixed;
+            left: ${leftOffset}px;
+            bottom: ${bottomOffset}px;
+            width: ${buttonSize}px;
+            height: ${buttonSize}px;
+            z-index: 1000;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        `;
+
+        const img = this.musicButton as HTMLImageElement;
+        img.style.cssText = `
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            cursor: pointer;
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+            transition: all 0.2s ease;
+        `;
+    }
+
+    private playStepSound(): void {
+        if (!this.player || this.isGameOver || this.isFinished) return;
+        const stepName = `step_${this.stepIndex}`;
+        this.playSound(stepName);
+        this.stepIndex = (this.stepIndex + 1) % 3;
+    }
+
+    private createCoinCounter(): void {
+        const container = document.createElement('div');
+        container.id = 'coin-counter-container';
+        document.body.appendChild(container);
+
+        const coinIcon = document.createElement('img');
+        coinIcon.src = coinTextureUrl;
+        coinIcon.alt = 'coin';
+        coinIcon.id = 'coin-icon';
+        coinIcon.draggable = false;
+        coinIcon.onerror = () => {
+            const fallbackSpan = document.createElement('span');
+            fallbackSpan.innerHTML = '🪙';
+            fallbackSpan.id = 'coin-icon-fallback';
+            fallbackSpan.style.cssText = `font-size: inherit; line-height: 1; display: inline-block;`;
+            coinIcon.replaceWith(fallbackSpan);
+            this.coinIconElement = fallbackSpan;
+        };
+
+        const countText = document.createElement('span');
+        countText.id = 'coinCount';
+        countText.textContent = `x${this.score}`;
+
+        container.appendChild(coinIcon);
+        container.appendChild(countText);
+
+        this.coinContainer = container;
+        this.coinCounterElement = countText;
+        this.coinIconElement = coinIcon;
+        this.updateCoinCounterStyles();
+    }
+
+    private updateCoinCounterStyles(): void {
+        if (!this.coinContainer) return;
+        const width = window.innerWidth;
+
+        let containerStyles = `position: fixed; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: flex-end; background: linear-gradient(135deg, #ff6b6b, #ff8e8e); box-shadow: 0 4px 14px rgba(255, 107, 107, 0.5); z-index: 100; font-family: 'Arial', sans-serif; pointer-events: none; overflow: visible; border: 2px solid rgba(255, 255, 255, 0.22); transition: all 0.3s ease;`;
+        let iconStyles = `object-fit: contain; filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55)); z-index: 101; position: relative; transition: all 0.3s ease;`;
+        let textStyles = `color: #ffd700; font-weight: bold; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5); text-align: center; letter-spacing: 1.5px; line-height: 1; transition: all 0.3s ease;`;
+
+        if (width >= 1920) {
+            containerStyles += `top: 45px; padding: 6px 28px 6px 0; height: 44px; min-width: 160px; border-radius: 24px;`;
+            iconStyles += `width: 76px; height: 76px; margin-left: -86px; margin-right: -22px; margin-top: -24px; margin-bottom: -24px; left: -28px; transform: scale(1.06);`;
+            textStyles += `font-size: 30px; min-width: 80px; margin-right: 6px;`;
+        } else if (width >= 1440) {
+            containerStyles += `top: 25px; padding: 3px 18px 3px 0; height: 30px; min-width: 110px; border-radius: 16px;`;
+            iconStyles += `width: 52px; height: 52px; margin-left: -62px; margin-right: -14px; margin-top: -16px; margin-bottom: -16px; left: -19px; transform: scale(1.02);`;
+            textStyles += `font-size: 20px; min-width: 55px; margin-right: 3px;`;
+        } else if (width >= 1024) {
+            containerStyles += `top: 20px; padding: 3px 16px 3px 0; height: 28px; min-width: 100px; border-radius: 15px;`;
+            iconStyles += `width: 48px; height: 48px; margin-left: -56px; margin-right: -12px; margin-top: -14px; margin-bottom: -14px; left: -17px; transform: scale(1.02);`;
+            textStyles += `font-size: 18px; min-width: 50px; margin-right: 3px;`;
+        } else if (width >= 768) {
+            containerStyles += `top: 18px; padding: 2px 14px 2px 0; height: 26px; min-width: 90px; border-radius: 14px;`;
+            iconStyles += `width: 44px; height: 44px; margin-left: -50px; margin-right: -10px; margin-top: -12px; margin-bottom: -12px; left: -15px; transform: scale(1.01);`;
+            textStyles += `font-size: 16px; min-width: 45px; margin-right: 2px;`;
+        } else if (width >= 576) {
+            containerStyles += `top: 16px; padding: 2px 12px 2px 0; height: 24px; min-width: 80px; border-radius: 12px;`;
+            iconStyles += `width: 40px; height: 40px; margin-left: -46px; margin-right: -8px; margin-top: -10px; margin-bottom: -10px; left: -13px; transform: scale(1);`;
+            textStyles += `font-size: 15px; min-width: 40px; margin-right: 2px;`;
+        } else if (width >= 425) {
+            containerStyles += `top: 14px; padding: 2px 10px 2px 0; height: 22px; min-width: 70px; border-radius: 11px;`;
+            iconStyles += `width: 36px; height: 36px; margin-left: -42px; margin-right: -6px; margin-top: -9px; margin-bottom: -9px; left: -11px; transform: scale(0.99);`;
+            textStyles += `font-size: 14px; min-width: 35px; margin-right: 2px;`;
+        } else {
+            containerStyles += `top: 12px; padding: 2px 8px 2px 0; height: 20px; min-width: 60px; border-radius: 10px;`;
+            iconStyles += `width: 32px; height: 32px; margin-left: -38px; margin-right: -4px; margin-top: -8px; margin-bottom: -8px; left: -9px; transform: scale(0.98);`;
+            textStyles += `font-size: 13px; min-width: 30px; margin-right: 2px;`;
+        }
+
+        this.coinContainer.style.cssText = containerStyles;
+
+        const icon = this.coinIconElement;
+        if (icon && icon.tagName === 'IMG') {
+            (icon as HTMLImageElement).style.cssText = iconStyles;
+        } else if (icon && (icon as HTMLElement).id === 'coin-icon-fallback') {
+            let emojiSize = width >= 1920 ? '76px' : width >= 1440 ? '52px' : width >= 1024 ? '48px' : width >= 768 ? '44px' : width >= 576 ? '40px' : width >= 425 ? '36px' : '32px';
+            let emojiLeft = width >= 1920 ? '-28px' : width >= 1440 ? '-19px' : width >= 1024 ? '-17px' : width >= 768 ? '-15px' : width >= 576 ? '-13px' : width >= 425 ? '-11px' : '-9px';
+            icon.style.cssText = `font-size: ${emojiSize}; filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.55)); z-index: 101; position: relative; left: ${emojiLeft}; transition: all 0.3s ease; line-height: 1; display: inline-block;`;
+        }
+
+        if (this.coinCounterElement) {
+            this.coinCounterElement.style.cssText = textStyles;
+        }
+    }
+
+    private updateCoinCounter(): void {
+        if (this.coinCounterElement) {
+            this.coinCounterElement.textContent = `x${this.score}`;
+        }
+    }
+
+    private createFinishLine(): void {
+        const finishGroup = new THREE.Group();
+        const tileSize = 0.5;
+        const tilesX = 12;
+        const tilesZ = 8;
+        const totalWidth = tilesX * tileSize;
+        const totalLength = tilesZ * tileSize;
+
+        for (let i = 0; i < tilesX; i++) {
+            for (let j = 0; j < tilesZ; j++) {
+                const isBlack = (i + j) % 2 === 0;
+                const color = isBlack ? 0x000000 : 0xffffff;
+                const emissiveColor = isBlack ? 0x111111 : 0x444444;
+
+                const material = new THREE.MeshStandardMaterial({
+                    color: color,
+                    emissive: emissiveColor,
+                    emissiveIntensity: 0.2,
+                    roughness: 0.4,
+                    metalness: 0.1
+                });
+
+                const geometry = new THREE.BoxGeometry(tileSize - 0.02, 0.05, tileSize - 0.02);
+                const tile = new THREE.Mesh(geometry, material);
+
+                const xPos = -totalWidth / 2 + i * tileSize + tileSize / 2;
+                const zPos = this.finishLineZ - totalLength / 2 + j * tileSize + tileSize / 2;
+
+                tile.position.set(xPos, 0.02, zPos);
+                tile.receiveShadow = true;
+                tile.castShadow = false;
+                finishGroup.add(tile);
+            }
+        }
+        this.scene.add(finishGroup);
+    }
+
+    private createExplosion(position: THREE.Vector3): void {
+        this.createFlashLight(position);
+        this.createExplosionCore(position);
+        this.createSparksAndDebris(position);
+        this.createFireball(position);
+        this.createSmoke(position);
+        setTimeout(() => { this.createShockwave(position); }, 300);
+    }
+
+    private createFlashLight(position: THREE.Vector3): void {
+        const light = new THREE.PointLight(0xff6600, 5, 15);
+        light.position.copy(position);
+        this.scene.add(light);
+
+        let life = 0;
+        const maxLife = 0.3;
+        const effect = {
+            update: (delta: number): boolean => {
+                life += delta;
+                const progress = life / maxLife;
+                light.intensity = 5 * (1 - progress);
+                if (life >= maxLife) {
+                    this.scene.remove(light);
+                    light.dispose();
+                    return true;
+                }
+                return false;
+            }
+        };
+        this.activeEffects.push(effect);
+    }
+
+    private createExplosionCore(position: THREE.Vector3): void {
+        const particleCount = 60;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+
+        for (let i = 0; i < particleCount; i++) {
+            positions[i * 3] = position.x;
+            positions[i * 3 + 1] = position.y;
+            positions[i * 3 + 2] = position.z;
+            colors[i * 3] = 1.0;
+            colors[i * 3 + 1] = 0.6 + Math.random() * 0.4;
+            colors[i * 3 + 2] = 0.1 + Math.random() * 0.2;
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+            size: 0.4,
+            vertexColors: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            transparent: true,
+            opacity: 1.0,
+            sizeAttenuation: true
+        });
+
+        const particles = new THREE.Points(geometry, material);
+        this.scene.add(particles);
+
+        const velocities: THREE.Vector3[] = [];
+        for (let i = 0; i < particleCount; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const speed = 8 + Math.random() * 8;
+            velocities.push(new THREE.Vector3(
+                Math.sin(phi) * Math.cos(theta) * speed,
+                Math.sin(phi) * Math.sin(theta) * speed,
+                Math.cos(phi) * speed
+            ));
+        }
+
+        let life = 0;
+        const maxLife = 0.8;
+        const effect = {
+            update: (delta: number): boolean => {
+                life += delta;
+                const progress = life / maxLife;
+                const posAttr = geometry.attributes.position;
+                const posArray = posAttr.array as Float32Array;
+                for (let i = 0; i < particleCount; i++) {
+                    posArray[i * 3] = position.x + velocities[i].x * progress * 2;
+                    posArray[i * 3 + 1] = position.y + velocities[i].y * progress * 2;
+                    posArray[i * 3 + 2] = position.z + velocities[i].z * progress * 2;
+                }
+                posAttr.needsUpdate = true;
+                material.opacity = 1 - progress * 1.5;
+                material.size = 0.4 * (1 - progress * 0.5);
+                if (life >= maxLife) {
+                    this.scene.remove(particles);
+                    geometry.dispose();
+                    material.dispose();
+                    return true;
+                }
+                return false;
+            }
+        };
+        this.activeEffects.push(effect);
+    }
+
+    private createFireball(position: THREE.Vector3): void {
+        const particleCount = 30;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+
+        for (let i = 0; i < particleCount; i++) {
+            positions[i * 3] = position.x;
+            positions[i * 3 + 1] = position.y;
+            positions[i * 3 + 2] = position.z;
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 32;
+        canvas.height = 32;
+        const ctx = canvas.getContext('2d')!;
+        const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+        gradient.addColorStop(0, 'rgba(255,255,255,1)');
+        gradient.addColorStop(0.4, 'rgba(255,200,100,1)');
+        gradient.addColorStop(0.7, 'rgba(255,100,0,0.8)');
+        gradient.addColorStop(1, 'rgba(255,0,0,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 32, 32);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.PointsMaterial({
+            size: 1.5,
+            map: texture,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            transparent: true,
+            opacity: 0.9,
+            sizeAttenuation: true,
+            color: 0xffaa33
+        });
+
+        const particles = new THREE.Points(geometry, material);
+        this.scene.add(particles);
+
+        const velocities: THREE.Vector3[] = [];
+        for (let i = 0; i < particleCount; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const speed = 2 + Math.random() * 3;
+            velocities.push(new THREE.Vector3(
+                Math.sin(phi) * Math.cos(theta) * speed,
+                Math.sin(phi) * Math.sin(theta) * speed * 0.5,
+                Math.cos(phi) * speed
+            ));
+        }
+
+        let life = 0;
+        const maxLife = 1.5;
+        const effect = {
+            update: (delta: number): boolean => {
+                life += delta;
+                const progress = life / maxLife;
+                const posAttr = geometry.attributes.position;
+                const posArray = posAttr.array as Float32Array;
+                for (let i = 0; i < particleCount; i++) {
+                    posArray[i * 3] = position.x + velocities[i].x * life * 1.5;
+                    posArray[i * 3 + 1] = position.y + 0.5 + velocities[i].y * life * 1.2;
+                    posArray[i * 3 + 2] = position.z + velocities[i].z * life * 1.5;
+                }
+                posAttr.needsUpdate = true;
+                material.opacity = 0.9 * (1 - progress * 0.8);
+                material.size = 1.5 * (1 + progress);
+                if (life >= maxLife) {
+                    this.scene.remove(particles);
+                    geometry.dispose();
+                    material.dispose();
+                    texture.dispose();
+                    return true;
+                }
+                return false;
+            }
+        };
+        this.activeEffects.push(effect);
+    }
+
+    private createSmoke(position: THREE.Vector3): void {
+        const particleCount = 25;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+
+        for (let i = 0; i < particleCount; i++) {
+            positions[i * 3] = position.x;
+            positions[i * 3 + 1] = position.y;
+            positions[i * 3 + 2] = position.z;
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 32;
+        canvas.height = 32;
+        const ctx = canvas.getContext('2d')!;
+        const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+        gradient.addColorStop(0, 'rgba(100,100,100,0.8)');
+        gradient.addColorStop(0.5, 'rgba(80,80,80,0.5)');
+        gradient.addColorStop(1, 'rgba(50,50,50,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 32, 32);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.PointsMaterial({
+            size: 2.0,
+            map: texture,
+            blending: THREE.NormalBlending,
+            depthWrite: false,
+            transparent: true,
+            opacity: 0.6,
+            sizeAttenuation: true,
+            color: 0x888888
+        });
+
+        const particles = new THREE.Points(geometry, material);
+        this.scene.add(particles);
+
+        const velocities: THREE.Vector3[] = [];
+        for (let i = 0; i < particleCount; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const speed = 1 + Math.random() * 2;
+            velocities.push(new THREE.Vector3(
+                Math.cos(theta) * speed,
+                Math.random() * 2,
+                Math.sin(theta) * speed
+            ));
+        }
+
+        let life = 0;
+        const maxLife = 2.2;
+        const effect = {
+            update: (delta: number): boolean => {
+                life += delta;
+                const progress = life / maxLife;
+                const posAttr = geometry.attributes.position;
+                const posArray = posAttr.array as Float32Array;
+                for (let i = 0; i < particleCount; i++) {
+                    posArray[i * 3] = position.x + velocities[i].x * life * 1.5;
+                    posArray[i * 3 + 1] = position.y + 1.0 + velocities[i].y * life * 2;
+                    posArray[i * 3 + 2] = position.z + velocities[i].z * life * 1.5;
+                }
+                posAttr.needsUpdate = true;
+                material.opacity = 0.6 * (1 - progress * 0.7);
+                material.size = 2.0 * (1 + progress);
+                if (life >= maxLife) {
+                    this.scene.remove(particles);
+                    geometry.dispose();
+                    material.dispose();
+                    texture.dispose();
+                    return true;
+                }
+                return false;
+            }
+        };
+        this.activeEffects.push(effect);
+    }
+
+    private createSparksAndDebris(position: THREE.Vector3): void {
+        const particleCount = 50;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+
+        for (let i = 0; i < particleCount; i++) {
+            positions[i * 3] = position.x;
+            positions[i * 3 + 1] = position.y;
+            positions[i * 3 + 2] = position.z;
+            colors[i * 3] = 0.9 + Math.random() * 0.3;
+            colors[i * 3 + 1] = 0.7 + Math.random() * 0.3;
+            colors[i * 3 + 2] = 0.3 + Math.random() * 0.3;
+        }
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+            size: 0.2,
+            vertexColors: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            transparent: true,
+            opacity: 1.0,
+            sizeAttenuation: true
+        });
+
+        const particles = new THREE.Points(geometry, material);
+        this.scene.add(particles);
+
+        const velocities: THREE.Vector3[] = [];
+        for (let i = 0; i < particleCount; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            const speed = 5 + Math.random() * 10;
+            velocities.push(new THREE.Vector3(
+                Math.sin(phi) * Math.cos(theta) * speed,
+                Math.sin(phi) * Math.sin(theta) * speed,
+                Math.cos(phi) * speed
+            ));
+        }
+
+        let life = 0;
+        const maxLife = 1.0;
+        const effect = {
+            update: (delta: number): boolean => {
+                life += delta;
+                const progress = life / maxLife;
+                const posAttr = geometry.attributes.position;
+                const posArray = posAttr.array as Float32Array;
+                for (let i = 0; i < particleCount; i++) {
+                    posArray[i * 3] = position.x + velocities[i].x * life * 2;
+                    posArray[i * 3 + 1] = position.y + velocities[i].y * life * 2;
+                    posArray[i * 3 + 2] = position.z + velocities[i].z * life * 2;
+                }
+                posAttr.needsUpdate = true;
+                material.opacity = 1 - progress * 1.5;
+                material.size = 0.2 * (1 - progress * 0.8);
+                if (life >= maxLife) {
+                    this.scene.remove(particles);
+                    geometry.dispose();
+                    material.dispose();
+                    return true;
+                }
+                return false;
+            }
+        };
+        this.activeEffects.push(effect);
+    }
+
+    private createShockwave(position: THREE.Vector3): void {
+        const segments = 32;
+        const geometry = new THREE.RingGeometry(0.1, 0.5, segments);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d')!;
+        const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+        gradient.addColorStop(0, 'rgba(255,255,255,0)');
+        gradient.addColorStop(0.3, 'rgba(255,200,100,0.8)');
+        gradient.addColorStop(0.6, 'rgba(255,100,50,0.4)');
+        gradient.addColorStop(1, 'rgba(255,0,0,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 64, 64);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.MeshBasicMaterial({
+            map: texture,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+
+        const ring = new THREE.Mesh(geometry, material);
+        ring.position.copy(position);
+        ring.position.y += 0.5;
+        ring.rotation.x = Math.PI / 2;
+        this.scene.add(ring);
+
+        let life = 0;
+        const maxLife = 0.8;
+        const effect = {
+            update: (delta: number): boolean => {
+                life += delta;
+                const progress = life / maxLife;
+                const scale = 1 + progress * 5;
+                ring.scale.set(scale, scale, scale);
+                ring.material.opacity = 1 - progress;
+                if (life >= maxLife) {
+                    this.scene.remove(ring);
+                    geometry.dispose();
+                    material.dispose();
+                    texture.dispose();
+                    return true;
+                }
+                return false;
+            }
+        };
+        this.activeEffects.push(effect);
+    }
+
+    // 🔥 Методы для руки-подсказки (PNG)
+    private createSwipeHandHint(): void {
+        const container = document.createElement('div');
+        container.id = 'swipe-hand-container';
+        container.style.cssText = `
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 999;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        `;
+        document.body.appendChild(container);
+        this.swipeHandContainer = container;
+
+        const handImg = document.createElement('img');
+        handImg.src = handTextureUrl;
+        handImg.alt = 'swipe hand';
+        handImg.draggable = false;
+        handImg.style.cssText = `
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.4));
+        `;
+        container.appendChild(handImg);
+        this.swipeHandElement = handImg;
+        this.updateSwipeHandStyles();
+    }
+
+    private updateSwipeHandStyles(): void {
+        if (!this.swipeHandContainer || !this.swipeHandElement) return;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        let containerSize: number;
+        let bottomOffset: number;
+        let moveDistance: number;
+
+        if (width >= 1920) {
+            containerSize = 140; bottomOffset = 120; moveDistance = 100;
+        } else if (width >= 1440) {
+            containerSize = 120; bottomOffset = 100; moveDistance = 90;
+        } else if (width >= 1024) {
+            containerSize = 110; bottomOffset = 100; moveDistance = 80;
+        } else if (width >= 768) {
+            containerSize = 100; bottomOffset = 100; moveDistance = 70;
+        } else if (width >= 576) {
+            containerSize = 90; bottomOffset = 90; moveDistance = 60;
+        } else if (width >= 425) {
+            containerSize = 80; bottomOffset = 80; moveDistance = 50;
+        } else {
+            containerSize = 70; bottomOffset = 70; moveDistance = 40;
+        }
+
+        if (height < 500 && width > height) {
+            containerSize = Math.min(containerSize, 70);
+            bottomOffset = 50;
+            moveDistance = Math.min(moveDistance, 40);
+        }
+
+        this.swipeHandContainer.style.cssText = `
+            position: fixed;
+            bottom: ${bottomOffset}px;
+            left: 50%;
+            transform: translateX(calc(-50% - ${this.handPosition}px));
+            width: ${containerSize}px;
+            height: ${containerSize}px;
+            z-index: 999;
+            pointer-events: none;
+            opacity: ${this.swipeHandContainer.style.opacity || '0'};
+            transition: opacity 0.5s ease, transform 0.1s linear;
+        `;
+        this.swipeHandElement.style.cssText = `
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.4));
+        `;
+        (this.swipeHandContainer as any).moveDistance = moveDistance;
+    }
+
+    private showSwipeHand(): void {
+        if (this.swipeHandContainer && !this.isTutorialVisible && !this.isGameOver && !this.isFinished) {
+            this.swipeHandContainer.style.opacity = '1';
+            this.startHandAnimation();
+        }
+    }
+
+    private hideSwipeHand(): void {
+        if (this.swipeHandContainer) {
+            this.swipeHandContainer.style.opacity = '0';
+            this.stopHandAnimation();
+        }
+    }
+
+    private startHandAnimation(): void {
+        if (this.handAnimationId !== null) return;
+        let startTime: number | null = null;
+        const duration = 2000;
+
+        const animate = (timestamp: number) => {
+            if (!startTime) startTime = timestamp;
+            const elapsed = timestamp - startTime;
+            const progress = (elapsed % duration) / duration;
+            const moveDistance = (this.swipeHandContainer as any)?.moveDistance || 80;
+            this.handPosition = Math.sin(progress * Math.PI) * moveDistance;
+
+            if (this.swipeHandContainer) {
+                this.swipeHandContainer.style.transform = `translateX(calc(-50% - ${this.handPosition}px))`;
+            }
+
+            if (!this.isTutorialVisible && !this.isGameOver && !this.isFinished) {
+                this.handAnimationId = requestAnimationFrame(animate);
+            } else {
+                this.handAnimationId = null;
+            }
+        };
+        this.handAnimationId = requestAnimationFrame(animate);
+    }
+
+    private stopHandAnimation(): void {
+        if (this.handAnimationId !== null) {
+            cancelAnimationFrame(this.handAnimationId);
+            this.handAnimationId = null;
+        }
+        this.handPosition = 0;
+        if (this.swipeHandContainer) {
+            this.swipeHandContainer.style.transform = 'translateX(-50%)';
+        }
+    }
+
+    private updateSwipeHandVisibility(): void {
+        if (!this.player || this.isTutorialVisible || this.isGameOver || this.isFinished) {
+            this.hideSwipeHand();
+            return;
+        }
+        const isMoving = this.player.isMovingForward();
+        if (isMoving) {
+            this.lastMoveTime = Date.now();
+            this.hideSwipeHand();
+        } else {
+            const timeSinceLastMove = Date.now() - this.lastMoveTime;
+            if (timeSinceLastMove > this.HAND_SHOW_DELAY) {
+                this.showSwipeHand();
+            }
+        }
+    }
+
+    // 🔥 ИЗМЕНЕНО: убран вызов playBackgroundMusic() из hide()
+    private showTutorial(): void {
+        const overlay = document.createElement('div');
+        overlay.id = 'tutorial';
+        overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: sans-serif; z-index: 1000; pointer-events: auto;`;
+        overlay.innerHTML = `
+            <h2 style="font-size: 28px; margin-bottom: 20px;">🎮 Как играть</h2>
+            <p style="font-size: 18px; margin: 10px;">👆 Свайпни <b>влево/вправо</b> для движения</p>
+            <p style="font-size: 18px; margin: 10px;">🪙 Собирай <b>монеты</b></p>
+            <p style="font-size: 18px; margin: 10px;">💣 Избегай <b>бомб</b></p>
+            <p style="font-size: 18px; margin: 10px;">🔷 Проходи сквозь <b>ворота</b> для бонусов!</p>
+            <p style="font-size: 18px; margin: 10px;">🏁 Достигни <b>финиша</b></p>
+            <p style="font-size: 18px; margin: 10px; margin-top: 30px; opacity: 0.8;">Нажми любую клавишу чтобы начать</p>
+        `;
+        document.body.appendChild(overlay);
+
+        const hide = () => {
+            if (this.isTutorialVisible) {
+                this.isTutorialVisible = false;
+                overlay.remove();
+                // 🔥 УБРАНО: this.playBackgroundMusic() — музыка теперь запускается при первом взаимодействии
+                this.createSwipeHandHint();
+                this.lastMoveTime = Date.now();
+            }
+        };
+
+        overlay.addEventListener('click', hide);
+        overlay.addEventListener('touchstart', hide);
+    }
+
+    // 🔥 ИЗМЕНЕНО: добавлен вызов playBackgroundMusic() при первом взаимодействии
+    private setupControls(): void {
+        let startX = 0;
+
+        const onStart = (x: number) => { startX = x; };
+        const onEnd = (x: number) => {
+            if (this.isFinished || this.isGameOver) return;
+            const diff = x - startX;
+            if (Math.abs(diff) > 50) {
+                this.player?.startMoving();
+                this.playBackgroundMusic(); // 🔥 Запуск музыки при первом свайпе
+                if (diff > 0) {
+                    console.log('👆 Свайп вправо');
+                    this.player?.moveRight();
+                } else {
+                    console.log('👆 Свайп влево');
+                    this.player?.moveLeft();
+                }
+            }
+        };
+
+        window.addEventListener('mousedown', (e) => onStart(e.clientX));
+        window.addEventListener('mouseup', (e) => onEnd(e.clientX));
+        window.addEventListener('touchstart', (e) => onStart(e.touches[0].clientX), { passive: true });
+        window.addEventListener('touchend', (e) => onEnd(e.changedTouches[0].clientX), { passive: true });
+
+        window.addEventListener('keydown', (e) => {
+            if (this.isFinished || this.isGameOver) return;
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
+                this.player?.startMoving();
+                this.playBackgroundMusic(); // 🔥 Запуск музыки при первом нажатии клавиши
+                if (e.key === 'ArrowLeft') {
+                    console.log('⬅️ Клавиша влево');
+                    this.player?.moveLeft();
+                }
+                if (e.key === 'ArrowRight') {
+                    console.log('➡️ Клавиша вправо');
+                    this.player?.moveRight();
+                }
+            }
+        });
+    }
+
+    start(): void {
+        this.animate();
+        window.addEventListener('resize', () => this.onResize());
+    }
+
+    private animate = (): void => {
+        requestAnimationFrame(this.animate);
+        const delta = Math.min(this.clock.getDelta(), 0.1);
+
+        if (this.player) {
+            this.player.update(delta);
+
+            if (this.player.isMovingForward() && !this.isGameOver && !this.isFinished) {
+                this.stepTimer += delta;
+                if (this.stepTimer >= this.STEP_INTERVAL) {
+                    this.stepTimer = 0;
+                    this.playStepSound();
+                }
+            }
+
+            this.updateSwipeHandVisibility();
+
+            if (this.world && !this.isFinished) {
+                this.world.update(this.player.getPosition().z);
+            }
+
+            if (!this.isFinished && !this.isGameOver && this.player.getPosition().z >= this.finishLineZ) {
+                this.handleFinish();
+            }
+
+            if (!this.isFinished && !this.isGameOver) {
+                this.checkCollisions();
+            }
+
+            const pos = this.player.getPosition();
+            this.camera.position.x += (pos.x - this.camera.position.x) * this.CAM_SMOOTH;
+            this.camera.position.y += (this.CAM_OFFSET_Y - this.camera.position.y) * this.CAM_SMOOTH;
+            this.camera.position.z += (pos.z + this.CAM_OFFSET_Z - this.camera.position.z) * this.CAM_SMOOTH;
+            this.camera.lookAt(pos.x, 1.5, pos.z + this.CAM_LOOKAHEAD);
+
+            if (this.characterLight) {
+                this.characterLight.position.x = pos.x;
+                this.characterLight.position.z = pos.z + 2;
+            }
+        }
+
+        for (let i = this.activeEffects.length - 1; i >= 0; i--) {
+            const completed = this.activeEffects[i].update(delta);
+            if (completed) {
+                this.activeEffects.splice(i, 1);
+            }
+        }
+
+        this.renderer.render(this.scene, this.camera);
     };
 
-    window.addEventListener('mousedown', (e) => onStart(e.clientX));
-    window.addEventListener('mouseup', (e) => onEnd(e.clientX));
-    window.addEventListener('touchstart', (e) => onStart(e.touches[0].clientX), { passive: true });
-    window.addEventListener('touchend', (e) => onEnd(e.changedTouches[0].clientX), { passive: true });
-    
-    window.addEventListener('keydown', (e) => {
-      if (this.isFinished || this.isGameOver) return;
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
-        this.player?.startMoving();
-        // Клавиши не инвертируем, так как они соответствуют физическому направлению
-        if (e.key === 'ArrowLeft') {
-          console.log('⬅️ Клавиша влево -> движение влево');
-          this.player?.moveLeft();
-        }
-        if (e.key === 'ArrowRight') {
-          console.log('➡️ Клавиша вправо -> движение вправо');
-          this.player?.moveRight();
-        }
-      }
-    });
-  }
+    private handleFinish(): void {
+        if (this.isFinished) return;
+        this.isFinished = true;
 
-  start(): void {
-    this.animate();
-    window.addEventListener('resize', () => this.onResize());
-  }
-
-  private animate = (): void => {
-    requestAnimationFrame(this.animate);
-    const delta = Math.min(this.clock.getDelta(), 0.1);
-
-    if (this.player) {
-      this.player.update(delta);
-      
-      if (this.player.isMovingForward() && !this.isGameOver && !this.isFinished) {
-        this.stepTimer += delta;
-        if (this.stepTimer >= this.STEP_INTERVAL) {
-          this.stepTimer = 0;
-          this.playStepSound();
-        }
-      }
-
-      if (this.world && !this.isFinished) {
-        this.world.update(this.player.getPosition().z);
-      }
-
-      if (!this.isFinished && !this.isGameOver && this.player.getPosition().z >= this.finishLineZ) {
-        this.handleFinish();
-      }
-
-      if (!this.isFinished && !this.isGameOver) {
-        this.checkCollisions();
-      }
-
-      const pos = this.player.getPosition();
-      this.camera.position.x += (pos.x - this.camera.position.x) * this.CAM_SMOOTH;
-      this.camera.position.y += (this.CAM_OFFSET_Y - this.camera.position.y) * this.CAM_SMOOTH;
-      this.camera.position.z += (pos.z + this.CAM_OFFSET_Z - this.camera.position.z) * this.CAM_SMOOTH;
-      this.camera.lookAt(pos.x, 1.5, pos.z + this.CAM_LOOKAHEAD);
-
-      if (this.characterLight) {
-        this.characterLight.position.x = pos.x;
-        this.characterLight.position.z = pos.z + 2;
-      }
-    }
-
-    for (let i = this.activeEffects.length - 1; i >= 0; i--) {
-      const completed = this.activeEffects[i].update(delta);
-      if (completed) {
-        this.activeEffects.splice(i, 1);
-      }
-    }
-
-    this.renderer.render(this.scene, this.camera);
-  };
-
-  private handleFinish(): void {
-    if (this.isFinished) return;
-    this.isFinished = true;
-
-    if (this.player) {
-      this.player.stopMoving();
-    }
-
-    if (this.world) {
-      this.world.clearAllObjects();
-    }
-
-    if (this.player && !this.isGameOver) {
-      this.player.faceCamera();
-      this.playSound('win');
-      
-      setTimeout(() => {
-        if (this.player && !this.isGameOver) {
-          this.player.playBreakdance(() => {
-            setTimeout(() => {
-              this.endGame(true);
-            }, 1500);
-          });
-        }
-      }, 300);
-    }
-  }
-
-  private checkCollisions(): void {
-    if (!this.player || !this.world || this.isGameOver || this.isFinished) return;
-
-    const playerPos = this.player.getPosition();
-    const objects = this.world.getActiveObjects();
-
-    for (let i = objects.length - 1; i >= 0; i--) {
-      const obj = objects[i];
-      const type = (obj as any).type as string;
-      obj.getWorldPosition(this.tempVector);
-      const distance = playerPos.distanceTo(this.tempVector);
-
-      let shouldCollide = false;
-      switch (type) {
-        case 'bomb': shouldCollide = distance < 0.5; break;
-        case 'coin': shouldCollide = distance < 0.8; break;
-        case 'gate': shouldCollide = distance < 2.5; break;
-      }
-
-      if (shouldCollide) {
-        this.handleCollision(obj, this.tempVector.clone());
-      }
-    }
-  }
-
-  private handleCollision(obj: THREE.Object3D, objPos: THREE.Vector3): void {
-    const type = (obj as any).type as string;
-
-    switch (type) {
-      case 'coin':
-        if ((obj as any).isCollected) return;
-        this.score += 1;
-        obj.visible = false;
-        (obj as any).isCollected = true;
-        this.updateCoinCounter();
-        this.playSound('coin');
-        break;
-
-      case 'bomb':
-        this.createExplosion(objPos);
-        this.playSound('bomb');
         if (this.player) {
-          this.player.playFall(() => {
-            this.playSound('lose');
-            this.endGame(false);
-            this.stopBackgroundMusic();
-          });
+            this.player.stopMoving();
         }
-        this.world?.removeObject(obj);
-        break;
-
-      case 'gate':
-        const gate = (obj as any).gate as Gate;
-        if (!gate || gate.isPassed()) return;
-        const playerPos = this.player?.getPosition() || new THREE.Vector3();
-        const side = playerPos.x < 0 ? 'left' : 'right';
-        const modifier = gate.getModifier(side);
-        if (modifier) {
-          switch (modifier.type) {
-            case '+': this.score += modifier.value; break;
-            case '-': this.score = Math.max(0, this.score - modifier.value); break;
-            case 'x': this.score *= modifier.value; break;
-          }
-          this.updateCoinCounter();
-          this.playSound('gate');
-          gate.markAsPassed();
+        if (this.world) {
+            this.world.clearAllObjects();
         }
-        break;
-    }
-  }
 
-  private async playSound(name: string): Promise<void> {
-    // Звуковые эффекты всегда играют, независимо от состояния музыки
-    try {
-      let audio = this.soundCache.get(name);
-
-      if (!audio) {
-        const loader = this.SOUND_LOADERS[name];
-        if (!loader) {
-          console.warn(`⚠️ Звук "${name}" не найден`);
-          return;
+        if (this.player && !this.isGameOver) {
+            this.player.faceCamera();
+            this.playSound('win');
+            setTimeout(() => {
+                if (this.player && !this.isGameOver) {
+                    this.player.playBreakdance(() => {
+                        setTimeout(() => {
+                            this.endGame(true);
+                        }, 1500);
+                    });
+                }
+            }, 300);
         }
-        audio = await AssetLoader.loadSound(name, loader);
-        this.setupAudio(audio, name);
-      }
-
-      const clone = audio.cloneNode() as HTMLAudioElement;
-      clone.play().catch(err => console.warn(`⚠️ Ошибка воспроизведения ${name}:`, err));
-
-    } catch (err) {
-      console.warn(`⚠️ Ошибка в playSound для ${name}:`, err);
-    }
-  }
-
-  private endGame(success: boolean): void {
-    this.isGameOver = true;
-    this.stopBackgroundMusic();
-
-    if (success && this.player) {
-      this.player.faceCamera();
     }
 
-    setTimeout(() => this.showEndCard(), success ? 1500 : 500);
-  }
+    private checkCollisions(): void {
+        if (!this.player || !this.world || this.isGameOver || this.isFinished) return;
 
-  private showEndCard(): void {
-    const overlay = document.createElement('div');
-    overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #1a1a2e, #16213e); display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: sans-serif; z-index: 2000;`;
-    overlay.innerHTML = `
-      <h1 style="font-size: 48px; margin: 0 0 10px;">${this.isFinished ? '🏆 ПОБЕДА! 🏆' : (this.score >= 10 ? '🎉' : '💀')} ${this.score} монет!</h1>
-      <p style="font-size: 20px; opacity: 0.8; margin-bottom: 30px;">${this.isFinished ? 'Ты добрался до финиша!' : (this.score >= 10 ? 'Отличный результат!' : 'Попробуй ещё раз!')}</p>
-      <button id="cta" style="padding: 20px 60px; font-size: 24px; font-weight: bold; background: linear-gradient(135deg, #4ecca3, #38b28a); border: none; border-radius: 50px; color: white; cursor: pointer; box-shadow: 0 10px 30px rgba(78, 204, 163, 0.4); transition: transform 0.2s; margin: 10px;">🚀 Установить игру</button>
-      <button id="retry" style="padding: 15px 40px; font-size: 18px; background: transparent; border: 2px solid rgba(255,255,255,0.3); border-radius: 30px; color: white; cursor: pointer; margin: 10px;">🔄 Сыграть ещё</button>
-    `;
-    document.body.appendChild(overlay);
+        const playerPos = this.player.getPosition();
+        const objects = this.world.getActiveObjects();
 
-    document.getElementById('cta')?.addEventListener('click', () => {
-      window.open('https://example.com/download', '_blank');
-    });
+        for (let i = objects.length - 1; i >= 0; i--) {
+            const obj = objects[i];
+            const type = (obj as any).type as string;
+            obj.getWorldPosition(this.tempVector);
+            const distance = playerPos.distanceTo(this.tempVector);
 
-    document.getElementById('retry')?.addEventListener('click', () => {
-      location.reload();
-    });
-  }
+            let shouldCollide = false;
+            switch (type) {
+                case 'bomb': shouldCollide = distance < 0.5; break;
+                case 'coin': shouldCollide = distance < 0.8; break;
+                case 'gate': shouldCollide = distance < 2.5; break;
+            }
 
-  getScore(): number {
-    return this.score;
-  }
+            if (shouldCollide) {
+                this.handleCollision(obj, this.tempVector.clone());
+            }
+        }
+    }
 
-  onResize(): void {
-    if (!this.camera || !this.renderer) return;
-    this.camera.aspect = window.innerWidth / window.innerHeight;
-    this.camera.updateProjectionMatrix();
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.updateCoinCounterStyles();
-    this.updateMusicButtonStyles();
-  }
+    private handleCollision(obj: THREE.Object3D, objPos: THREE.Vector3): void {
+        const type = (obj as any).type as string;
+
+        switch (type) {
+            case 'coin':
+                if ((obj as any).isCollected) return;
+                this.score += 1;
+                obj.visible = false;
+                (obj as any).isCollected = true;
+                this.updateCoinCounter();
+                this.playSound('coin');
+                break;
+
+            case 'bomb':
+                this.createExplosion(objPos);
+                this.playSound('bomb');
+                if (this.player) {
+                    this.player.playFall(() => {
+                        this.playSound('lose');
+                        this.endGame(false);
+                        this.stopBackgroundMusic();
+                    });
+                }
+                this.world?.removeObject(obj);
+                break;
+
+            case 'gate':
+                const gate = (obj as any).gate as Gate;
+                if (!gate || gate.isPassed()) return;
+                const playerPos = this.player?.getPosition() || new THREE.Vector3();
+                const side = playerPos.x < 0 ? 'left' : 'right';
+                const modifier = gate.getModifier(side);
+                if (modifier) {
+                    switch (modifier.type) {
+                        case '+': this.score += modifier.value; break;
+                        case '-': this.score = Math.max(0, this.score - modifier.value); break;
+                        case 'x': this.score *= modifier.value; break;
+                    }
+                    this.updateCoinCounter();
+                    this.playSound('gate');
+                    gate.markAsPassed();
+                }
+                break;
+        }
+    }
+
+    private async playSound(name: string): Promise<void> {
+        try {
+            let audio = this.soundCache.get(name);
+            if (!audio) {
+                const loader = this.SOUND_LOADERS[name];
+                if (!loader) {
+                    console.warn(`⚠️ Звук "${name}" не найден`);
+                    return;
+                }
+                audio = await AssetLoader.loadSound(name, loader);
+                this.setupAudio(audio, name);
+            }
+            const clone = audio.cloneNode() as HTMLAudioElement;
+            clone.play().catch(err => console.warn(`⚠️ Ошибка воспроизведения ${name}:`, err));
+        } catch (err) {
+            console.warn(`⚠️ Ошибка в playSound для ${name}:`, err);
+        }
+    }
+
+    private endGame(success: boolean): void {
+        this.isGameOver = true;
+        this.stopBackgroundMusic();
+
+        if (success && this.player) {
+            this.player.faceCamera();
+        }
+        setTimeout(() => this.showEndCard(), success ? 1500 : 500);
+    }
+
+    private showEndCard(): void {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #1a1a2e, #16213e); display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; font-family: sans-serif; z-index: 2000;`;
+        overlay.innerHTML = `
+            <h1 style="font-size: 48px; margin: 0 0 10px;">${this.isFinished ? '🏆 ПОБЕДА! 🏆' : (this.score >= 10 ? '🎉' : '💀')} ${this.score} монет!</h1>
+            <p style="font-size: 20px; opacity: 0.8; margin-bottom: 30px;">${this.isFinished ? 'Ты добрался до финиша!' : (this.score >= 10 ? 'Отличный результат!' : 'Попробуй ещё раз!')}</p>
+            <button id="cta" style="padding: 20px 60px; font-size: 24px; font-weight: bold; background: linear-gradient(135deg, #4ecca3, #38b28a); border: none; border-radius: 50px; color: white; cursor: pointer; box-shadow: 0 10px 30px rgba(78, 204, 163, 0.4); transition: transform 0.2s; margin: 10px;">🚀 Установить игру</button>
+            <button id="retry" style="padding: 15px 40px; font-size: 18px; background: transparent; border: 2px solid rgba(255,255,255,0.3); border-radius: 30px; color: white; cursor: pointer; margin: 10px;">🔄 Сыграть ещё</button>
+        `;
+        document.body.appendChild(overlay);
+
+        document.getElementById('cta')?.addEventListener('click', () => {
+            window.open('https://example.com/download', '_blank');
+        });
+        document.getElementById('retry')?.addEventListener('click', () => {
+            location.reload();
+        });
+    }
+
+    getScore(): number {
+        return this.score;
+    }
+
+    onResize(): void {
+        if (!this.camera || !this.renderer) return;
+        this.camera.aspect = window.innerWidth / window.innerHeight;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.updateCoinCounterStyles();
+        this.updateMusicButtonStyles();
+        this.updateSwipeHandStyles();
+    }
 }
