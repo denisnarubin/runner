@@ -18,7 +18,7 @@ class App {
     this.game = new Game(canvas)
     this.game.start()
     
-    console.log('🎮 Playable Runner initialized!')
+
   }
 }
 

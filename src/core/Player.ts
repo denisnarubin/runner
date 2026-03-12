@@ -1,7 +1,5 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-
-// 🔥 МОДЕЛИ И АНИМАЦИИ — СТАТИЧЕСКИЕ ИМПОРТЫ (критично для работы!)
 import characterModelUrl from '../assets/models/Character.fbx?url';
 import runningAnimUrl from '../assets/models/Running.fbx?url';
 import gameOverAnimUrl from '../assets/models/Game_over.fbx?url';
@@ -19,19 +17,23 @@ export type CharacterSkin =
 
 export type PlayerState = 'idle' | 'running' | 'falling' | 'dancing' | 'breakdance' | 'finished';
 
+type AnimationToLoad = {
+  path: string;
+  name: string;
+};
+
 export class Player {
   private mesh: THREE.Group;
-  private currentLane = 0;
-  private readonly LANE_WIDTH = 1.8;
-  private readonly FORWARD_SPEED = 0.15;
-  private readonly MOVE_LERP = 0.15;
+  private currentLane: number = 0;
+  private readonly LANE_WIDTH: number = 1.8;
+  private readonly FORWARD_SPEED: number = 0.15;
+  private readonly MOVE_LERP: number = 0.15;
 
   private mixer: THREE.AnimationMixer | null = null;
   private actions: Map<string, THREE.AnimationAction> = new Map();
   private currentState: PlayerState = 'idle';
-  private isMoving = false;
+  private isMoving: boolean = false;
 
-  // 🔥 Таймеры — используются в stopAllAnimations()
   private fallTimer: number | null = null;
   private danceTimer: number | null = null;
   
@@ -39,27 +41,25 @@ export class Player {
   private onDanceComplete?: () => void;
 
   private atlasTexture: THREE.Texture | null = null;
-  private currentSkin: CharacterSkin = 'Character_Hotdog';
+  private currentSkin: CharacterSkin;
   private characterMeshes: Map<string, THREE.Mesh> = new Map();
 
   constructor(skin: CharacterSkin = 'Character_Hotdog') {
     this.mesh = new THREE.Group();
     this.currentSkin = skin;
     
-    this.loadAssets(() => {
-      console.log('🎮 Персонаж полностью загружен!');
+    this.loadAssets((): void => {
       this.setSkin(this.currentSkin);
-      setTimeout(() => {
-        console.log('▶️ Запуск idle анимации');
+      setTimeout((): void => {
         this.playAnimation('idle');
       }, 500);
     });
   }
 
   private loadAssets(onComplete: () => void): void {
-    this.loadAtlas(() => {
-      this.loadCharacterModel(() => {
-        this.loadMixamoAnimations(() => {
+    this.loadAtlas((): void => {
+      this.loadCharacterModel((): void => {
+        this.loadMixamoAnimations((): void => {
           onComplete();
         });
       });
@@ -67,11 +67,11 @@ export class Player {
   }
 
   private loadAtlas(onReady: () => void): void {
-    const loader = new THREE.TextureLoader();
+    const loader: THREE.TextureLoader = new THREE.TextureLoader();
     loader.crossOrigin = 'anonymous';
     loader.load(
       textureAtlasUrl,
-      (texture) => {
+      (texture: THREE.Texture): void => {
         texture.colorSpace = THREE.SRGBColorSpace;
         texture.wrapS = THREE.ClampToEdgeWrapping;
         texture.wrapT = THREE.ClampToEdgeWrapping;
@@ -81,52 +81,47 @@ export class Player {
         texture.flipY = true;
         texture.needsUpdate = true;
         this.atlasTexture = texture;
-        console.log('✅ Текстура атласа загружена');
         onReady();
       },
       undefined,
-      () => {
-        console.warn('⚠️ Текстура не загружена');
+      (): void => {
         onReady();
       }
     );
   }
 
   private loadCharacterModel(onReady: () => void): void {
-    const loader = new FBXLoader();
+    const loader: FBXLoader = new FBXLoader();
     loader.crossOrigin = 'anonymous';
     loader.load(
       characterModelUrl,
-      (object: THREE.Object3D) => {
-        console.log('✅ Базовая модель загружена');
-        const model = object;
-        model.traverse((child) => {
+      (object: THREE.Object3D): void => {
+        object.traverse((child: THREE.Object3D): void => {
           if (child instanceof THREE.Mesh && child.name) {
             this.characterMeshes.set(child.name, child);
           }
         });
 
         if (this.atlasTexture) {
-          this.applyTextureToModel(model);
+          this.applyTextureToModel(object);
         }
 
-        this.mesh.add(model);
+        this.mesh.add(object);
         this.mesh.position.set(0, 0.75, 0);
 
-        const box = new THREE.Box3().setFromObject(model);
-        const size = new THREE.Vector3();
+        const box: THREE.Box3 = new THREE.Box3().setFromObject(object);
+        const size: THREE.Vector3 = new THREE.Vector3();
         box.getSize(size);
         if (size.y > 0.1) {
-          const scale = 2.5 / size.y;
+          const scale: number = 2.5 / size.y;
           this.mesh.scale.setScalar(scale);
         }
 
-        this.mixer = new THREE.AnimationMixer(model);
+        this.mixer = new THREE.AnimationMixer(object);
         onReady();
       },
       undefined,
-      (err) => {
-        console.error('❌ Ошибка загрузки модели:', err);
+      (): void => {
         this.createPlaceholderCube();
         onReady();
       }
@@ -134,17 +129,18 @@ export class Player {
   }
 
   private applyTextureToModel(object: THREE.Object3D): void {
-    let texturedMeshes = 0;
-    object.traverse((child) => {
+    object.traverse((child: THREE.Object3D): void => {
       if (child instanceof THREE.Mesh && child.isMesh) {
         child.castShadow = true;
         child.receiveShadow = true;
         if (!child.geometry.attributes.uv) {
-          console.warn(`  ⚠️ Нет UV у ${child.name}`);
           return;
         }
-        const material = new THREE.MeshStandardMaterial({
-          map: this.atlasTexture!,
+        if (!this.atlasTexture) {
+          return;
+        }
+        const material: THREE.MeshStandardMaterial = new THREE.MeshStandardMaterial({
+          map: this.atlasTexture,
           color: 0xffffff,
           roughness: 0.5,
           metalness: 0.1,
@@ -158,32 +154,29 @@ export class Player {
           material.map.colorSpace = THREE.SRGBColorSpace;
         }
         child.material = material;
-        texturedMeshes++;
       }
     });
-    console.log(`🎨 Текстура применена к ${texturedMeshes} мешам`);
   }
 
   private loadMixamoAnimations(onReady: () => void): void {
     if (!this.mixer) {
-      console.error('❌ Микшер не инициализирован!');
       onReady();
       return;
     }
 
-    const loader = new FBXLoader();
+    const loader: FBXLoader = new FBXLoader();
     loader.crossOrigin = 'anonymous';
     
-    const animationsToLoad = [
+    const animationsToLoad: AnimationToLoad[] = [
       { path: runningAnimUrl, name: 'run' },
       { path: gameOverAnimUrl, name: 'fall' },
       { path: breakdanceAnimUrl, name: 'breakdance' }
     ];
 
-    let loaded = 0;
-    const total = animationsToLoad.length;
+    let loaded: number = 0;
+    const total: number = animationsToLoad.length;
 
-    const checkDone = () => {
+    const checkDone = (): void => {
       if (++loaded >= total) {
         if (!this.actions.has('idle')) {
           this.createIdleAnimation();
@@ -192,19 +185,19 @@ export class Player {
       }
     };
 
-    animationsToLoad.forEach(({ path, name }) => {
+    animationsToLoad.forEach(({ path, name }: AnimationToLoad): void => {
       loader.load(
         path,
-        (object: THREE.Object3D) => {
+        (object: THREE.Object3D): void => {
           if (object.animations && object.animations.length > 0) {
-            let clip = object.animations.find(clip => clip.duration > 0.5);
+            let clip: THREE.AnimationClip | undefined = object.animations.find((clip: THREE.AnimationClip): boolean => clip.duration > 0.5);
             if (!clip && object.animations.length > 0) {
               clip = object.animations[0];
             }
-            if (clip) {
-              const clonedClip = clip.clone();
+            if (clip && this.mixer) {
+              const clonedClip: THREE.AnimationClip = clip.clone();
               clonedClip.name = name;
-              const action = this.mixer!.clipAction(clonedClip);
+              const action: THREE.AnimationAction = this.mixer.clipAction(clonedClip);
               
               if (name === 'fall' || name === 'breakdance') {
                 action.loop = THREE.LoopOnce;
@@ -217,11 +210,11 @@ export class Player {
             }
           }
           
-          object.traverse((child) => {
+          object.traverse((child: THREE.Object3D): void => {
             if (child instanceof THREE.Mesh) {
               child.geometry?.dispose();
               if (Array.isArray(child.material)) {
-                child.material.forEach(m => m?.dispose());
+                child.material.forEach((m: THREE.Material): void => m?.dispose());
               } else {
                 child.material?.dispose();
               }
@@ -230,8 +223,7 @@ export class Player {
           checkDone();
         },
         undefined,
-        (err) => {
-          console.warn(`⚠️ Не удалось загрузить ${name}:`, err);
+        (): void => {
           checkDone();
         }
       );
@@ -240,24 +232,25 @@ export class Player {
 
   private createIdleAnimation(): void {
     if (!this.mixer) return;
-    const times = [0, 1, 2];
-    const posY = [0, 0.03, 0];
-    const rotY = [0, 0.05, 0];
-    const positionTrack = new THREE.VectorKeyframeTrack('.position[y]', times, posY);
-    const rotationTrack = new THREE.VectorKeyframeTrack('.rotation[y]', times, rotY);
-    const clip = new THREE.AnimationClip('idle', 2, [positionTrack, rotationTrack]);
-    const action = this.mixer.clipAction(clip);
+    const times: number[] = [0, 1, 2];
+    const posY: number[] = [0, 0.03, 0];
+    const rotY: number[] = [0, 0.05, 0];
+    
+    const positionTrack: THREE.VectorKeyframeTrack = new THREE.VectorKeyframeTrack('.position[y]', times, posY);
+    const rotationTrack: THREE.VectorKeyframeTrack = new THREE.VectorKeyframeTrack('.rotation[y]', times, rotY);
+    
+    const clip: THREE.AnimationClip = new THREE.AnimationClip('idle', 2, [positionTrack, rotationTrack]);
+    const action: THREE.AnimationAction = this.mixer.clipAction(clip);
     action.loop = THREE.LoopRepeat;
     this.actions.set('idle', action);
   }
 
   private playAnimation(name: string, fadeIn: number = 0.2): void {
-    const newAction = this.actions.get(name);
+    const newAction: THREE.AnimationAction | undefined = this.actions.get(name);
     if (!newAction) {
-      console.warn(`⚠️ Анимация "${name}" не найдена!`);
       return;
     }
-    this.actions.forEach((action) => {
+    this.actions.forEach((action: THREE.AnimationAction): void => {
       if (action.isRunning()) {
         action.fadeOut(fadeIn);
       }
@@ -293,42 +286,42 @@ export class Player {
     this.onFallComplete = onComplete;
     this.currentState = 'falling';
     this.isMoving = false;
-    const fallAction = this.actions.get('fall');
+    const fallAction: THREE.AnimationAction | undefined = this.actions.get('fall');
     if (fallAction) {
       fallAction.time = 0;
       fallAction.reset();
       this.playAnimation('fall', 0.1);
-      let fallDuration = fallAction.getClip()?.duration || 1.5;
-      this.fallTimer = window.setTimeout(() => {
+      const fallDuration: number = fallAction.getClip()?.duration || 1.5;
+      this.fallTimer = window.setTimeout((): void => {
         this.fallTimer = null;
         if (this.onFallComplete) this.onFallComplete();
       }, fallDuration * 1000);
     } else {
-      setTimeout(() => { if (this.onFallComplete) this.onFallComplete(); }, 800);
+      setTimeout((): void => { if (this.onFallComplete) this.onFallComplete(); }, 800);
     }
   }
 
   playBreakdance(onComplete?: () => void): void {
-    if (this.danceTimer) {
+    if (this.danceTimer !== null) {
       clearTimeout(this.danceTimer);
       this.danceTimer = null;
     }
     this.onDanceComplete = onComplete;
     this.currentState = 'breakdance';
     this.isMoving = false;
-    const danceAction = this.actions.get('breakdance');
+    const danceAction: THREE.AnimationAction | undefined = this.actions.get('breakdance');
     if (danceAction) {
       danceAction.time = 0;
       danceAction.reset();
       this.playAnimation('breakdance', 0.3);
-      let danceDuration = danceAction.getClip()?.duration || 3.5;
-      const totalWaitTime = (danceDuration * 1000) + 500;
-      this.danceTimer = window.setTimeout(() => {
+      const danceDuration: number = danceAction.getClip()?.duration || 3.5;
+      const totalWaitTime: number = (danceDuration * 1000) + 500;
+      this.danceTimer = window.setTimeout((): void => {
         this.danceTimer = null;
         if (this.onDanceComplete) this.onDanceComplete();
       }, totalWaitTime);
     } else {
-      setTimeout(() => { if (this.onDanceComplete) this.onDanceComplete(); }, 4000);
+      setTimeout((): void => { if (this.onDanceComplete) this.onDanceComplete(); }, 4000);
     }
   }
 
@@ -336,7 +329,6 @@ export class Player {
     this.mesh.rotation.y = Math.PI;
   }
 
-  // 🔥 ДОБАВЛЕНО: Метод очистки таймеров (убирает предупреждения TS)
   stopAllAnimations(): void {
     if (this.fallTimer !== null) {
       clearTimeout(this.fallTimer);
@@ -346,29 +338,20 @@ export class Player {
       clearTimeout(this.danceTimer);
       this.danceTimer = null;
     }
-    this.actions.forEach(action => {
+    this.actions.forEach((action: THREE.AnimationAction): void => {
       action.stop();
     });
   }
 
-  /**
-   * ИСПРАВЛЕНО: Инвертировано управление для соответствия камере
-   * При нажатии кнопки влево персонаж движется вправо (на экране)
-   * При нажатии кнопки вправо персонаж движется влево (на экране)
-   */
   moveLeft(): void {
-    // При нажатии кнопки влево - движемся вправо (увеличиваем X)
     if (this.currentLane < 1) {
       this.currentLane++;
-      console.log(`⬅️ Нажата кнопка ВЛЕВО -> персонаж движется ВПРАВО, полоса: ${this.currentLane}, X цель: ${this.currentLane * this.LANE_WIDTH}`);
     }
   }
 
   moveRight(): void {
-    // При нажатии кнопки вправо - движемся влево (уменьшаем X)
     if (this.currentLane > -1) {
       this.currentLane--;
-      console.log(`➡️ Нажата кнопка ВПРАВО -> персонаж движется ВЛЕВО, полоса: ${this.currentLane}, X цель: ${this.currentLane * this.LANE_WIDTH}`);
     }
   }
 
@@ -379,10 +362,8 @@ export class Player {
       this.mesh.position.z += this.FORWARD_SPEED * 60 * delta;
     }
     
-    // Рассчитываем целевую X координату
-    const targetX = this.currentLane * this.LANE_WIDTH;
+    const targetX: number = this.currentLane * this.LANE_WIDTH;
     
-    // Плавно перемещаемся к целевой позиции
     this.mesh.position.x = THREE.MathUtils.lerp(this.mesh.position.x, targetX, this.MOVE_LERP);
   }
 
@@ -398,10 +379,9 @@ export class Player {
     return this.currentState;
   }
 
-  // 🔥 ИСПРАВЛЕНО: Корректная проверка видимости скина
   setSkin(skin: CharacterSkin): void {
     this.currentSkin = skin;
-    this.characterMeshes.forEach((mesh, name) => {
+    this.characterMeshes.forEach((mesh: THREE.Mesh, name: string): void => {
       mesh.visible = (this.currentSkin === 'ALL' || name === this.currentSkin);
     });
   }
@@ -415,9 +395,9 @@ export class Player {
   }
 
   private createPlaceholderCube(): void {
-    const geo = new THREE.BoxGeometry(1.0, 2.0, 1.0);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x4ecca3 });
-    const mesh = new THREE.Mesh(geo, mat);
+    const geometry: THREE.BoxGeometry = new THREE.BoxGeometry(1.0, 2.0, 1.0);
+    const material: THREE.MeshStandardMaterial = new THREE.MeshStandardMaterial({ color: 0x4ecca3 });
+    const mesh: THREE.Mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(0, 1.0, 0);
     mesh.castShadow = true;
     this.mesh.add(mesh);
