@@ -1,26 +1,13 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import type { CharacterSkin, PlayerState, AnimationToLoad } from '../types/types';
 import characterModelUrl from '../assets/models/Character.fbx?url';
 import runningAnimUrl from '../assets/models/Running.fbx?url';
 import gameOverAnimUrl from '../assets/models/Game_over.fbx?url';
 import breakdanceAnimUrl from '../assets/models/Breakdance.fbx?url';
 import textureAtlasUrl from '../assets/textures/Polygon_City_Characters_Texture_01_A.webp';
 
-export type CharacterSkin =
-  | 'Character_Jock' | 'Character_Grandma' | 'Character_ShopKeeper'
-  | 'Character_SummerGirl' | 'Character_Hobo' | 'Character_HipsterGirl'
-  | 'Character_FastFoodGuy' | 'Character_HipsterGuy' | 'Character_Roadworker'
-  | 'Character_Gangster' | 'Character_Biker' | 'Character_FireFighter'
-  | 'Character_PunkGuy' | 'Character_Grandpa' | 'Character_Tourist'
-  | 'Character_Hotdog' | 'Character_PunkGirl' | 'Character_Paramedic'
-  | 'Character_GamerGirl' | 'ALL';
 
-export type PlayerState = 'idle' | 'running' | 'falling' | 'dancing' | 'breakdance' | 'finished';
-
-type AnimationToLoad = {
-  path: string;
-  name: string;
-};
 
 export class Player {
   private mesh: THREE.Group;

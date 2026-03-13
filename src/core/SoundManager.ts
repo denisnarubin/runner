@@ -9,7 +9,6 @@ export class SoundManager {
   private audioContext: AudioContext | null = null;
   private onMusicToggleCallback: ((isMuted: boolean) => void) | null = null;
 
-
   private readonly MUSIC_MUTE_KEY = 'game_music_muted';
 
   private readonly SOUND_LOADERS: Record<string, () => Promise<string>> = {
@@ -30,25 +29,20 @@ export class SoundManager {
     this.loadBackgroundMusic();
   }
 
-
   private loadMusicMuteState(): void {
     try {
       const saved = localStorage.getItem(this.MUSIC_MUTE_KEY);
       if (saved !== null) {
         this.isMusicMuted = saved === 'true';
-        console.log('Music mute state loaded:', this.isMusicMuted);
       }
     } catch (_e: unknown) {
-
     }
   }
-
 
   private saveMusicMuteState(): void {
     try {
       localStorage.setItem(this.MUSIC_MUTE_KEY, String(this.isMusicMuted));
     } catch (_e: unknown) {
-
     }
   }
 
@@ -91,10 +85,6 @@ export class SoundManager {
       music.loop = true;
       music.volume = 0.2;
       music.preload = 'auto';
-      music.oncanplaythrough = () => { };
-      music.onerror = () => {
-        this.backgroundMusic = null;
-      };
       this.backgroundMusic = music;
     } catch (_e: unknown) {
     }
@@ -113,8 +103,6 @@ export class SoundManager {
   }
 
   public async playSound(name: string): Promise<void> {
-
-    
     try {
       await this.resumeAudioContext();
       let audio = this.soundCache.get(name);
@@ -131,35 +119,24 @@ export class SoundManager {
         const clone = audio.cloneNode() as HTMLAudioElement;
         clone.volume = audio.volume;
         await clone.play();
-        clone.onended = () => {
-          clone.src = '';
-          clone.load();
-        };
       }
     } catch (_err: unknown) {
     }
   }
 
   public playStepSound(): void {
-
-    
     const stepName = `step_${this.stepIndex}`;
     this.playSound(stepName);
     this.stepIndex = (this.stepIndex + 1) % 3;
   }
 
   public playBackgroundMusic(): void {
-
     if (this.isMusicMuted) return;
-    
     if (this.backgroundMusic && !this.musicStarted) {
       this.resumeAudioContext().then(() => {
         this.backgroundMusic?.play()
-          .then(() => {
-            this.musicStarted = true;
-          })
-          .catch((_err: unknown) => {
-          });
+          .then(() => { this.musicStarted = true; })
+          .catch((_err: unknown) => { });
       });
     }
   }
@@ -172,14 +149,36 @@ export class SoundManager {
     }
   }
 
+  public async fadeMusicOut(duration: number = 1000): Promise<void> {
+    return new Promise((resolve) => {
+      if (!this.backgroundMusic || this.isMusicMuted) {
+        resolve();
+        return;
+      }
+      const startTime = Date.now();
+      const startVolume = this.backgroundMusic.volume;
+      const fade = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        this.backgroundMusic!.volume = startVolume * (1 - progress);
+        if (progress < 1) {
+          requestAnimationFrame(fade);
+        } else {
+          this.backgroundMusic!.pause();
+          this.backgroundMusic!.currentTime = 0;
+          this.musicStarted = false;
+          this.backgroundMusic!.volume = 0.2;
+          resolve();
+        }
+      };
+      fade();
+    });
+  }
+
   public toggleMusic(): void {
     this.isMusicMuted = !this.isMusicMuted;
-    
-
     this.saveMusicMuteState();
-    
-
-
+    console.log('Music toggle:', this.isMusicMuted ? 'MUTED' : 'PLAYING');
     if (this.backgroundMusic) {
       if (this.isMusicMuted) {
         this.backgroundMusic.pause();
@@ -187,16 +186,11 @@ export class SoundManager {
       } else {
         this.resumeAudioContext().then(() => {
           this.backgroundMusic?.play()
-            .then(() => {
-              this.musicStarted = true;
-            })
-            .catch((_err: unknown) => {
-            });
+            .then(() => { this.musicStarted = true; })
+            .catch((_err: unknown) => { });
         });
       }
     }
-
-
     if (this.onMusicToggleCallback) {
       this.onMusicToggleCallback(this.isMusicMuted);
     }
@@ -204,7 +198,6 @@ export class SoundManager {
 
   public setOnMusicToggleCallback(callback: (isMuted: boolean) => void): void {
     this.onMusicToggleCallback = callback;
-
     callback(this.isMusicMuted);
   }
 
@@ -214,23 +207,5 @@ export class SoundManager {
 
   public getBackgroundMusic(): HTMLAudioElement | null {
     return this.backgroundMusic;
-  }
-
-  public isMusicStarted(): boolean {
-    return this.musicStarted;
-  }
-
-  public cleanup(): void {
-    this.stopBackgroundMusic();
-    this.soundCache.forEach(audio => {
-      audio.pause();
-      audio.src = '';
-      audio.load();
-    });
-    this.soundCache.clear();
-    if (this.audioContext) {
-      this.audioContext.close().catch((_err: unknown) => { });
-      this.audioContext = null;
-    }
   }
 }

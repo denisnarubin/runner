@@ -14,12 +14,11 @@ export class GameUI {
   private currentScore: number = 0;
   private soundManager: SoundManager | null = null;
 
-  constructor(scene: THREE.Scene, score: number = 0) {
+  constructor(scene: THREE.Scene, score: number = 0, soundManager?: SoundManager) {
     this.scene = scene;
     this.currentScore = score;
     this.coinCounter = new CoinCounter();
     
-
     this.musicControls = new MusicControls(() => {
       if (this.soundManager) {
         this.soundManager.toggleMusic();
@@ -29,12 +28,18 @@ export class GameUI {
     this.swipeHandHint = new SwipeHandHint();
     this.endScreen = new EndScreen(score);
     this.createFinishLine();
+    
+    if (soundManager) {
+      this.setSoundManager(soundManager);
+    }
   }
 
   public setSoundManager(soundManager: SoundManager): void {
     this.soundManager = soundManager;
-
     this.musicControls.setIsMuted(soundManager.isMusicMutedValue());
+    this.soundManager.setOnMusicToggleCallback((isMuted: boolean) => {
+      this.musicControls.setIsMuted(isMuted);
+    });
   }
 
   private createFinishLine(): void {

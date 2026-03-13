@@ -41,7 +41,6 @@ export class MusicControls {
       this.handleToggle();
     });
 
-
     container.addEventListener('touchend', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -105,7 +104,6 @@ export class MusicControls {
       cursor: pointer;
     `;
   }
-
 
   public setIsMuted(muted: boolean): void {
     this.isMusicMuted = muted;

@@ -1,19 +1,13 @@
 import * as THREE from 'three';
 import { World } from './World';
 import { Player } from './Player';
-import { Gate } from './Gate';
+
+import type { ObjectWithType } from '../types/types';
 import { SoundManager } from './SoundManager';
 import { EffectsManager } from './EffectsManager';
 import { GameUI } from './GameUI';
 
-type ObjectWithType = THREE.Object3D & {
-  type?: 'coin' | 'bomb' | 'gate';
-  scoreValue?: number;
-  initialRotation?: number;
-  isCollected?: boolean;
-  visible?: boolean;
-  gate?: Gate;
-};
+
 
 export class Game {
   private scene: THREE.Scene;
@@ -35,14 +29,10 @@ export class Game {
   private soundManager: SoundManager;
   private effectsManager: EffectsManager;
   private gameUI: GameUI;
-  
-
   private stepTimer = 0;
   private readonly STEP_SOUND_INTERVAL = 0.45;
-  
   private audioContext: AudioContext | null = null;
   private isAudioUnlocked = false;
-  private isMusicPlaying = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.scene = new THREE.Scene();
@@ -95,9 +85,7 @@ export class Game {
 
     this.soundManager = new SoundManager();
     this.effectsManager = new EffectsManager(this.scene);
-    this.gameUI = new GameUI(this.scene, 0);
-
-    this.gameUI.setSoundManager(this.soundManager);
+    this.gameUI = new GameUI(this.scene, 0, this.soundManager);
 
     this.initializeAudioContext();
     this.setupControls();
@@ -113,7 +101,6 @@ export class Game {
       const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioContextClass) {
         this.audioContext = new AudioContextClass();
-
         const unlockAudio = () => {
           if (!this.isAudioUnlocked && this.audioContext) {
             if (this.audioContext.state === 'suspended') {
@@ -127,7 +114,6 @@ export class Game {
             }
           }
         };
-
         window.addEventListener('click', unlockAudio, { once: true });
         window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
         window.addEventListener('keydown', unlockAudio, { once: true });
@@ -178,7 +164,7 @@ export class Game {
       const diff = x - startX;
       if (Math.abs(diff) > 50) {
         this.player?.startMoving();
-        this.unlockAndPlayMusic();
+        this.soundManager.playBackgroundMusic();
         if (diff > 0) {
           this.player?.moveRight();
         } else {
@@ -196,7 +182,7 @@ export class Game {
       if (this.isFinished || this.isGameOver) return;
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') {
         this.player?.startMoving();
-        this.unlockAndPlayMusic();
+        this.soundManager.playBackgroundMusic();
         if (e.key === 'ArrowLeft') {
           this.player?.moveLeft();
         }
@@ -205,31 +191,6 @@ export class Game {
         }
       }
     });
-
-    this.gameUI.getMusicControls();
-  }
-
-  private unlockAndPlayMusic(): void {
-    if (this.isMusicPlaying) return;
-    
-    if (this.audioContext && this.audioContext.state === 'suspended') {
-      this.audioContext.resume().then(() => {
-        this.isAudioUnlocked = true;
-        this.playMusic();
-      }).catch((_err: unknown) => {
-        this.playMusic();
-      });
-    } else {
-      this.isAudioUnlocked = true;
-      this.playMusic();
-    }
-  }
-
-  private playMusic(): void {
-    if (!this.isMusicPlaying) {
-      this.isMusicPlaying = true;
-      this.soundManager.playBackgroundMusic();
-    }
   }
 
   start(): void {
@@ -243,7 +204,6 @@ export class Game {
 
     if (this.player) {
       this.player.update(delta);
-
 
       if (this.player.isMovingForward() && !this.isGameOver && !this.isFinished) {
         this.stepTimer += delta;
@@ -355,9 +315,9 @@ export class Game {
         this.effectsManager.createExplosion(objPos);
         this.soundManager.playSound('bomb');
         if (this.player) {
-          this.player.playFall(() => {
+          this.player.playFall(async () => {
             this.soundManager.playSound('lose');
-            this.soundManager.stopBackgroundMusic();
+            await this.soundManager.fadeMusicOut(800);
             setTimeout(() => this.gameUI.showEndScreen(false), 500);
           });
         }
@@ -383,10 +343,10 @@ export class Game {
     }
   }
 
-  private endGame(success: boolean): void {
+  private async endGame(success: boolean): Promise<void> {
     this.isGameOver = true;
     this.gameUI.setGameOver(true);
-    this.soundManager.stopBackgroundMusic();
+    await this.soundManager.fadeMusicOut(1000);
 
     if (success && this.player) {
       this.player.faceCamera();
