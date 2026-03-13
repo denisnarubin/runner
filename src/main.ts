@@ -1,4 +1,4 @@
-// src/main.ts
+
 import { Game } from './core/Game.js'
 
 class App {
@@ -18,7 +18,7 @@ class App {
     this.game = new Game(canvas)
     this.game.start()
     
-    console.log('🎮 Playable Runner initialized!')
+
   }
 }
 
