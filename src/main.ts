@@ -1,4 +1,4 @@
-// src/main.ts
+
 import { Game } from './core/Game.js'
 
 class App {

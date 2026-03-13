@@ -1,4 +1,4 @@
-// helpers/chunkManager.ts
+
 import * as THREE from 'three';
 import { ObjectSpawner } from './objectSpawner';
 import { disposeObject } from '../utils/textureSetup';
@@ -28,11 +28,11 @@ export class ChunkManager {
   private createChunk(zPosition: number): THREE.Group {
     const chunk = new THREE.Group();
     
-    // Создаем дорогу
+
     const road = this.createRoad();
     chunk.add(road);
     
-    // Спавним объекты
+
     this.objectSpawner.spawnInChunk(chunk);
     
     chunk.position.z = zPosition;
@@ -92,7 +92,7 @@ export class ChunkManager {
         if (typedChild.type === 'coin' && !typedChild.isCollected) {
           child.rotation.y += CONST.COIN.ROTATION_SPEED;
           
-          // Используем значение по умолчанию, если initialRotation не определен
+
           const initialRotation = typedChild.initialRotation ?? 0;
           child.position.y = 1.2 + Math.sin(Date.now() * 0.003 + initialRotation) * CONST.COIN.FLOAT_AMPLITUDE;
         }
@@ -137,7 +137,6 @@ export class ChunkManager {
 
   respawnObjects(): void {
     this.chunks.forEach(chunk => {
-      // Удаляем старые объекты
       for (let i = chunk.children.length - 1; i >= 0; i--) {
         const child = chunk.children[i];
         const typedChild = child as ObjectWithType;
@@ -145,7 +144,7 @@ export class ChunkManager {
           chunk.remove(child);
         }
       }
-      // Спавним новые
+
       this.objectSpawner.spawnInChunk(chunk);
     });
   }

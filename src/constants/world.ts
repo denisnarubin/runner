@@ -1,4 +1,4 @@
-// constants/world.ts
+
 export const CHUNK = {
     LENGTH: 20,
     SPAWN_DISTANCE: 200,

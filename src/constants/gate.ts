@@ -1,4 +1,4 @@
-// constants/gate.ts
+
 export const GATE = {
     FRAME_HEIGHT: 3.8,
     ROAD_HALF_WIDTH: 2.7,

@@ -1,4 +1,4 @@
-// helpers/objectSpawner.ts
+
 import * as THREE from 'three';
 import { Gate } from '../core/Gate';
 import { CollisionHelper } from './collisionHelper';

@@ -1,4 +1,4 @@
-// world/World.ts
+
 import * as THREE from 'three';
 import { ChunkManager } from '../helpers/chunkManager';
 import { ObjectSpawner } from '../helpers/objectSpawner';
@@ -27,12 +27,12 @@ export class World {
       const objectSpawner = new ObjectSpawner(
         coinModel,
         bombModel,
-        'plus-left' // начальный layout
+        'plus-left' 
       );
 
       this.chunkManager = new ChunkManager(this.scene, objectSpawner);
 
-      // Небольшая задержка для гарантии загрузки
+
       setTimeout(() => {
         if (!this._respawnDone && this.chunkManager) {
           this.chunkManager.respawnObjects();

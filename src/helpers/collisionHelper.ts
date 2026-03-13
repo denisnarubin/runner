@@ -1,4 +1,4 @@
-// helpers/collisionHelper.ts
+
 import type { Position2D } from '../types/types';
 import * as CONST from '../constants/world';
 

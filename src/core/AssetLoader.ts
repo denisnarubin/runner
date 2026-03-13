@@ -1,4 +1,4 @@
-// 🔥 Сервис для ленивой загрузки ЗВУКОВ с кэшированием
+
 
 export class AssetLoader {
     private static cache = new Map<string, HTMLAudioElement>()

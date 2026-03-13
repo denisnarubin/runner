@@ -1,4 +1,4 @@
-// utils/gateUtils.ts
+
 import * as THREE from 'three';
 import type { GateModifier } from '../types/types';
 import { GATE_MODIFIER } from '../constants/gate';

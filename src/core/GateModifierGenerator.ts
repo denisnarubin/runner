@@ -1,4 +1,4 @@
-// core/GateModifierGenerator.ts
+
 import type { GateModifier, GatePairLayout } from '../types/types';
 import { generateModifierValue } from '../utils/gateUtils';
 import { GATE } from '../constants/gate';

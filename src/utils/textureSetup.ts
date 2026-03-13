@@ -1,4 +1,4 @@
-// utils/textureSetup.ts
+
 import * as THREE from 'three';
 
 export function setupTexture(

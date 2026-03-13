@@ -1,4 +1,4 @@
-// core/GateFrame.ts
+
 import * as THREE from 'three';
 import { GATE } from '../constants/gate';
 import { createFrameMaterial } from '../utils/gateUtils';

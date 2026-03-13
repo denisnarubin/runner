@@ -54,7 +54,7 @@ export class Gate {
     const rightSectionLeftX = GATE.PAIR_GAP / 2;
     const rightSectionRightX = GATE.ROAD_HALF_WIDTH;
 
-    // Левая секция
+
     this.createGateSection(
       leftSectionLeftX,
       leftSectionRightX,
@@ -63,7 +63,7 @@ export class Gate {
       'left'
     );
 
-    // Правая секция
+
     this.createGateSection(
       rightSectionLeftX,
       rightSectionRightX,
@@ -93,11 +93,11 @@ export class Gate {
     material: THREE.Material,
     section: GateSection
   ): void {
-    // Создаем рамки
+
     const frames = GateFrame.createPair(leftX, rightX, material);
     frames.forEach(frame => this.mesh.add(frame));
 
-    // Создаем стену с текстом
+
     const wall = GateWall.create(leftX, rightX, modifier, section);
     this.mesh.add(wall);
   }

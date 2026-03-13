@@ -1,4 +1,4 @@
-// core/GateWall.ts
+
 import * as THREE from 'three';
 import type { GateModifier, GateSection } from '../types/types';
 import { GATE, GATE_COLORS } from '../constants/gate';
