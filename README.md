@@ -15,7 +15,7 @@
 ```bash
 git clone https://github.com/denisnarubin/runner.git
 #Переход в директорию проекта
-cd playable-runner
+cd runner
 ```
 
 ### Запуск в режиме разработки:
